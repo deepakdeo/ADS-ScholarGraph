@@ -73,9 +73,12 @@ Note: `ADS_API_TOKEN` is only required for data extraction/expansion. The API/UI
 `data/` is gitignored and not committed. Generate all datasets locally.
 
 1. Set ADS token in `.env`:
+   Create an ADS account at <https://ui.adsabs.harvard.edu/>, then open Settings -> API Token to generate your key.
+   Keep this token local only (never commit it).
    ```env
    ADS_API_TOKEN=your_token_here
    ```
+   ADS enforces API usage quotas; check your ADS settings/docs for your current daily limit.
 2. Phase 1 extract raw ADS JSONL:
    ```bash
    python -m ads_scholargraph.pipeline.extract \

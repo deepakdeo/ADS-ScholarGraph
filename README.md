@@ -136,3 +136,40 @@ RETURN p.bibcode, p.title, p.pagerank
 ORDER BY p.pagerank DESC
 LIMIT 10;
 ```
+
+## Phase 4: Recommendations + Offline Evaluation
+
+1. Graph recommendations:
+   ```bash
+   python -m ads_scholargraph.recsys.cli \
+     --bibcode <BIBCODE> \
+     --k 10 \
+     --mode graph
+   ```
+
+2. Embedding recommendations (TF-IDF over title+abstract, cached under `.cache/`):
+   ```bash
+   python -m ads_scholargraph.recsys.cli \
+     --bibcode <BIBCODE> \
+     --k 10 \
+     --mode embed
+   ```
+
+3. Hybrid recommendations:
+   ```bash
+   python -m ads_scholargraph.recsys.cli \
+     --bibcode <BIBCODE> \
+     --k 10 \
+     --mode hybrid \
+     --candidate-pool 200
+   ```
+
+4. Offline evaluation report:
+   ```bash
+   python -m ads_scholargraph.recsys.eval \
+     --citations data/processed/ads_star/citations.parquet \
+     --k 10 \
+     --holdout-fraction 0.2 \
+     --min-heldout 2 \
+     --out docs/eval_report.md
+   ```

@@ -13,6 +13,7 @@ neo4j_data/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.cache/
 .coverage
 htmlcov/
 

@@ -6,10 +6,20 @@ import argparse
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-from neo4j import Driver, GraphDatabase, Session
+
+if TYPE_CHECKING:
+    from neo4j import Driver, Session
+else:
+    Driver = Any
+    Session = Any
+
+try:
+    from neo4j import GraphDatabase
+except ModuleNotFoundError:
+    GraphDatabase = None
 
 from ads_scholargraph.config import get_settings
 
@@ -23,7 +33,8 @@ SET p.title = row.title,
     p.year = row.year,
     p.abstract = row.abstract,
     p.doi = row.doi,
-    p.citation_count = row.citation_count
+    p.citation_count = row.citation_count,
+    p.is_seed = row.is_seed
 """
 
 AUTHOR_QUERY = """
@@ -51,7 +62,9 @@ MERGE (p)-[:PUBLISHED_IN]->(v)
 CITATION_QUERY = """
 UNWIND $rows AS row
 MERGE (src:Paper {bibcode: row.source_bibcode})
+ON CREATE SET src.is_seed = false
 MERGE (dst:Paper {bibcode: row.target_bibcode})
+ON CREATE SET dst.is_seed = false
 MERGE (src)-[:CITES]->(dst)
 """
 
@@ -72,6 +85,14 @@ def _clean_int(value: Any) -> int | None:
         if value.is_integer():
             return int(value)
         return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
     return None
 
 
@@ -110,6 +131,7 @@ def _load_papers(indir: Path) -> list[dict[str, Any]]:
                 "abstract": _clean_string(row.get("abstract")),
                 "doi": _clean_string(row.get("doi")),
                 "citation_count": _clean_int(row.get("citation_count")),
+                "is_seed": True,
             }
         )
     return rows
@@ -165,6 +187,8 @@ def load_kg(
     """Load parquet tables from indir into Neo4j."""
 
     settings = get_settings()
+    if GraphDatabase is None:
+        raise RuntimeError("neo4j package is not installed. Install dependencies to load Neo4j.")
     driver: Driver = GraphDatabase.driver(
         settings.NEO4J_URI,
         auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),

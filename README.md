@@ -127,3 +127,12 @@ Expected outputs in `data/processed/ads_star/`:
 - top papers by `pagerank`
 - community size distribution by `community_id`
 - top authors by `betweenness`
+
+Example seed-only PageRank check:
+```cypher
+MATCH (p:Paper)
+WHERE p.is_seed = true AND p.title IS NOT NULL
+RETURN p.bibcode, p.title, p.pagerank
+ORDER BY p.pagerank DESC
+LIMIT 10;
+```

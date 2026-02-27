@@ -43,3 +43,24 @@ LIMIT 25;
 // 8) Shortest citation path between two papers (bounded depth)
 MATCH path = shortestPath((src:Paper {bibcode: $source_bibcode})-[:CITES*..6]->(dst:Paper {bibcode: $target_bibcode}))
 RETURN path;
+
+// 9) Top papers by computed PageRank
+MATCH (p:Paper)
+WHERE p.pagerank IS NOT NULL
+RETURN p.bibcode AS bibcode, p.title AS title, p.pagerank AS pagerank
+ORDER BY pagerank DESC
+LIMIT 20;
+
+// 10) Community sizes from computed community_id
+MATCH (p:Paper)
+WHERE p.community_id IS NOT NULL
+RETURN p.community_id AS community_id, count(*) AS paper_count
+ORDER BY paper_count DESC, community_id ASC
+LIMIT 50;
+
+// 11) Top authors by computed betweenness
+MATCH (a:Author)
+WHERE a.betweenness IS NOT NULL
+RETURN a.name AS author, a.betweenness AS betweenness
+ORDER BY betweenness DESC
+LIMIT 20;

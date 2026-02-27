@@ -16,6 +16,7 @@ dependencies = [
   "pandas>=2.2",
   "pyarrow>=15.0",
   "neo4j>=5.18",
+  "networkx>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +50,16 @@ warn_unused_ignores = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["requests", "requests.*", "pandas", "pandas.*", "neo4j", "neo4j.*"]
+module = [
+  "requests",
+  "requests.*",
+  "pandas",
+  "pandas.*",
+  "neo4j",
+  "neo4j.*",
+  "networkx",
+  "networkx.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

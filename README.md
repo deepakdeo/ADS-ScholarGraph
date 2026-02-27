@@ -4,7 +4,7 @@ Production-style scaffold for a NASA ADS-powered knowledge graph and scientific 
 
 ## What This Project Is
 
-ADS ScholarGraph ingests scholarly metadata and citation links from NASA ADS, builds a Neo4j knowledge graph, and serves hybrid recommendations through an API and demo app. This repository currently contains Phase 0 scaffolding only (project structure, config, local infra, and CI).
+ADS ScholarGraph ingests scholarly metadata and citation links from NASA ADS, builds a Neo4j knowledge graph, and serves hybrid recommendations through an API and demo app. This repository currently implements data ingestion/normalization, citation expansion, Neo4j loading, and graph analytics feature write-back (Phases 0-3).
 
 ## Quickstart
 
@@ -107,3 +107,23 @@ Expected outputs in `data/processed/ads_star/`:
    ORDER BY p.citation_count DESC
    LIMIT 20;
    ```
+
+## Phase 3: Graph Analytics
+
+1. Ensure Neo4j is running and Phase 2 load is complete.
+
+2. Run analytics in auto mode (try GDS first, then fall back to NetworkX):
+   ```bash
+   python -m ads_scholargraph.graph_analytics.run_analytics --mode auto
+   ```
+
+3. Optionally force a mode:
+   ```bash
+   python -m ads_scholargraph.graph_analytics.run_analytics --mode gds
+   python -m ads_scholargraph.graph_analytics.run_analytics --mode networkx
+   ```
+
+4. Inspect analytics properties in Neo4j Browser using `kg/queries.cypher`, including:
+- top papers by `pagerank`
+- community size distribution by `community_id`
+- top authors by `betweenness`

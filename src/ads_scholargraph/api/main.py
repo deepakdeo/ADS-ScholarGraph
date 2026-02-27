@@ -18,12 +18,16 @@ if TYPE_CHECKING:
 else:
     Driver = Any
 
+_graph_database: Any | None
+_neo4j_error: type[Exception]
 try:
-    from neo4j import GraphDatabase
-    from neo4j.exceptions import Neo4jError
+    from neo4j import GraphDatabase as _neo4j_graph_database
+    from neo4j.exceptions import Neo4jError as _Neo4jError
+    _graph_database = _neo4j_graph_database
+    _neo4j_error = _Neo4jError
 except ModuleNotFoundError:
-    GraphDatabase = None
-    Neo4jError = Exception
+    _graph_database = None
+    _neo4j_error = Exception
 
 app = FastAPI(title="ADS ScholarGraph API", version="0.1.0")
 
@@ -81,10 +85,10 @@ class Neo4jRepository:
     @classmethod
     def from_settings(cls) -> Neo4jRepository:
         settings = get_settings()
-        if GraphDatabase is None:
+        if _graph_database is None:
             raise RuntimeError("neo4j package is not installed. Install dependencies to run API.")
 
-        driver = GraphDatabase.driver(
+        driver = _graph_database.driver(
             settings.NEO4J_URI,
             auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
         )
@@ -138,7 +142,7 @@ class Neo4jRepository:
                 rows = [dict(record) for record in session.run(fulltext_query, q=q, limit=limit)]
                 if rows:
                     return rows
-            except Neo4jError:
+            except _neo4j_error:
                 pass
 
             return [dict(record) for record in session.run(fallback_query, q=q, limit=limit)]

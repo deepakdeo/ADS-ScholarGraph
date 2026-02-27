@@ -14,10 +14,12 @@ if TYPE_CHECKING:
 else:
     Driver = Any
 
+_graph_database: Any | None
 try:
-    from neo4j import GraphDatabase
+    from neo4j import GraphDatabase as _neo4j_graph_database
+    _graph_database = _neo4j_graph_database
 except ModuleNotFoundError:
-    GraphDatabase = None
+    _graph_database = None
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -60,12 +62,12 @@ class EmbeddingRecommender:
 
     def _fetch_seed_papers(self) -> list[dict[str, Any]]:
         settings = get_settings()
-        if GraphDatabase is None:
+        if _graph_database is None:
             raise RuntimeError(
                 "neo4j package is not installed. Install dependencies to query Neo4j."
             )
 
-        driver: Driver = GraphDatabase.driver(
+        driver: Driver = _graph_database.driver(
             settings.NEO4J_URI,
             auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
         )

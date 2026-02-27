@@ -7,21 +7,24 @@ import json
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal
 
+from ads_scholargraph.config import get_settings
+
 if TYPE_CHECKING:
     from neo4j import Driver, Session
 else:
     Driver = Any
     Session = Any
 
+_graph_database: Any | None
+_neo4j_driver_error: type[Exception]
 try:
-    from neo4j import GraphDatabase
+    from neo4j import GraphDatabase as _neo4j_graph_database
     from neo4j.exceptions import Neo4jError as _Neo4jDriverError
-    Neo4jDriverError = _Neo4jDriverError
+    _graph_database = _neo4j_graph_database
+    _neo4j_driver_error = _Neo4jDriverError
 except ModuleNotFoundError:
-    GraphDatabase = None
-    Neo4jDriverError = Exception
-
-from ads_scholargraph.config import get_settings
+    _graph_database = None
+    _neo4j_driver_error = Exception
 
 AnalyticsMode = Literal["auto", "gds", "networkx"]
 
@@ -66,7 +69,7 @@ def _write_rows(
 def _is_gds_available(session: Session) -> bool:
     try:
         record = session.run("CALL gds.version() YIELD version RETURN version LIMIT 1").single()
-    except Neo4jDriverError:
+    except _neo4j_driver_error:
         return False
     return record is not None
 
@@ -138,7 +141,7 @@ def _compute_gds_metrics(session: Session) -> dict[str, list[dict[str, Any]]]:
                 """,
                 graph_name=citation_graph,
             )
-        except Neo4jDriverError:
+        except _neo4j_driver_error:
             community_result = session.run(
                 """
                 CALL gds.leiden.stream($graph_name)
@@ -302,11 +305,11 @@ def run_analytics(
     settings = get_settings()
     managed_driver = driver is None
     if driver is None:
-        if GraphDatabase is None:
+        if _graph_database is None:
             raise RuntimeError(
                 "neo4j package is not installed. Install dependencies to run analytics."
             )
-        resolved_driver = GraphDatabase.driver(
+        resolved_driver = _graph_database.driver(
             settings.NEO4J_URI,
             auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
         )

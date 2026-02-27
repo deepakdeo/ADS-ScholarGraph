@@ -10,18 +10,20 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
+from ads_scholargraph.config import get_settings
+
 if TYPE_CHECKING:
     from neo4j import Driver, Session
 else:
     Driver = Any
     Session = Any
 
+GraphDatabase: Any | None
 try:
-    from neo4j import GraphDatabase
+    from neo4j import GraphDatabase as _neo4j_graph_database
+    GraphDatabase = _neo4j_graph_database
 except ModuleNotFoundError:
     GraphDatabase = None
-
-from ads_scholargraph.config import get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_FILE = REPO_ROOT / "kg" / "schema.cypher"

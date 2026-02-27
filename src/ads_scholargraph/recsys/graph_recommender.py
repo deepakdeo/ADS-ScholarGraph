@@ -12,10 +12,12 @@ if TYPE_CHECKING:
 else:
     Driver = Any
 
+_graph_database: Any | None
 try:
-    from neo4j import GraphDatabase
+    from neo4j import GraphDatabase as _neo4j_graph_database
+    _graph_database = _neo4j_graph_database
 except ModuleNotFoundError:
-    GraphDatabase = None
+    _graph_database = None
 
 
 @dataclass
@@ -47,11 +49,11 @@ class Neo4jGraphClient:
     @classmethod
     def from_settings(cls) -> Neo4jGraphClient:
         settings = get_settings()
-        if GraphDatabase is None:
+        if _graph_database is None:
             raise RuntimeError(
                 "neo4j package is not installed. Install dependencies to query Neo4j."
             )
-        driver = GraphDatabase.driver(
+        driver = _graph_database.driver(
             settings.NEO4J_URI,
             auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
         )

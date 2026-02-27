@@ -24,6 +24,12 @@ class _FakeRepository:
     def search_seed_papers(self, q: str, limit: int) -> list[dict[str, Any]]:
         return [{"bibcode": "B1", "title": "Seed Paper", "year": 2024}]
 
+    def get_citation_edges(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
+        return [{"source": "B1", "target": "R1"}]
+
+    def get_keyword_links(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
+        return [{"bibcode": "R1", "keyword": "quenching"}]
+
 
 def test_health_endpoint() -> None:
     client = TestClient(app)
@@ -71,5 +77,54 @@ def test_recommend_endpoint_graph_mode(monkeypatch) -> None:
         rows = resp.json()
         assert rows[0]["bibcode"] == "R1"
         assert rows[0]["reasons"] == ["Shares 3 references"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_subgraph_endpoint(monkeypatch) -> None:
+    app.dependency_overrides[get_repository] = lambda: _FakeRepository()
+
+    def fake_graph(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "bibcode": "R1",
+                "title": "Rec 1",
+                "year": 2023,
+                "score": 0.91,
+                "reasons": ["Same community (2)"],
+            },
+            {
+                "bibcode": "R2",
+                "title": "Rec 2",
+                "year": 2022,
+                "score": 0.73,
+                "reasons": ["High TF-IDF similarity"],
+            },
+        ]
+
+    monkeypatch.setattr("ads_scholargraph.api.main.recommend_similar_papers_graph", fake_graph)
+
+    client = TestClient(app)
+    try:
+        resp = client.get(
+            "/subgraph/paper/B1",
+            params={
+                "k": 2,
+                "mode": "graph",
+                "include_citations": True,
+                "include_keywords": True,
+            },
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+
+        node_ids = {node["id"] for node in payload["nodes"]}
+        assert {"B1", "R1", "R2"}.issubset(node_ids)
+        assert any(node["type"] == "keyword" for node in payload["nodes"])
+
+        edge_types = {edge["type"] for edge in payload["edges"]}
+        assert "RECOMMENDS" in edge_types
+        assert "CITES" in edge_types
+        assert "HAS_KEYWORD" in edge_types
     finally:
         app.dependency_overrides.clear()

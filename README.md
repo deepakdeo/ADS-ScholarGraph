@@ -186,6 +186,14 @@ LIMIT 10;
 - FastAPI docs: http://localhost:8000/docs
 - Streamlit dashboard: http://localhost:8501
 
+Phase 5.5 polish included:
+- sanitized abstract rendering (`<sub>/<sup>` and basic formatting preserved safely)
+- interactive **Graph View** tab (seed + recommendations with labeled edges)
+- Phase 5.6 graph clarity polish:
+  - short node labels by default with configurable max label length
+  - rich hover tooltips (full title, bibcode, year, score, reasons)
+  - recruiter-clean legend, tuned layout physics, optional edge labels, and node detail inspector
+
 3. API quick checks:
    ```bash
    curl http://localhost:8000/health
@@ -199,5 +207,6 @@ LIMIT 10;
 2. Select a seed paper from the dropdown list.
 3. In sidebar, keep `mode=hybrid`, `k=10`, then click **Recommend**.
 4. Show recommendation table with score and reasons.
-5. Expand seed/recommended abstracts to explain why candidates are relevant.
-6. Open FastAPI `/docs` and execute `/recommend/paper/{bibcode}` live to show API-first design.
+5. Open **Graph View** to visualize the local recommendation subgraph.
+6. Expand seed/recommended abstracts to explain why candidates are relevant.
+7. Open FastAPI `/docs` and execute `/subgraph/paper/{bibcode}` live to show API-first design.

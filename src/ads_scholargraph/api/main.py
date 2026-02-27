@@ -52,6 +52,26 @@ class SearchResult(BaseModel):
     year: int | None
 
 
+class SubgraphNode(BaseModel):
+    id: str
+    label: str
+    type: Literal["seed", "recommended", "keyword"]
+    year: int | None = None
+    title: str | None = None
+
+
+class SubgraphEdge(BaseModel):
+    source: str
+    target: str
+    label: str
+    type: Literal["RECOMMENDS", "CITES", "HAS_KEYWORD"]
+
+
+class SubgraphResponse(BaseModel):
+    nodes: list[SubgraphNode]
+    edges: list[SubgraphEdge]
+
+
 class Neo4jRepository:
     """Read-only Neo4j access layer for API routes."""
 
@@ -123,6 +143,39 @@ class Neo4jRepository:
 
             return [dict(record) for record in session.run(fallback_query, q=q, limit=limit)]
 
+    def get_citation_edges(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
+        if not bibcodes:
+            return []
+
+        query = """
+        MATCH (src:Paper)-[:CITES]->(dst:Paper)
+        WHERE src.bibcode IN $bibcodes AND dst.bibcode IN $bibcodes
+        RETURN DISTINCT src.bibcode AS source, dst.bibcode AS target
+        LIMIT $limit
+        """
+        with self._driver.session() as session:
+            return [
+                dict(record)
+                for record in session.run(query, bibcodes=bibcodes, limit=limit)
+            ]
+
+    def get_keyword_links(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
+        if not bibcodes:
+            return []
+
+        query = """
+        MATCH (p:Paper)-[:HAS_KEYWORD]->(k:Keyword)
+        WHERE p.bibcode IN $bibcodes
+        RETURN p.bibcode AS bibcode, k.name AS keyword
+        ORDER BY keyword ASC
+        LIMIT $limit
+        """
+        with self._driver.session() as session:
+            return [
+                dict(record)
+                for record in session.run(query, bibcodes=bibcodes, limit=limit)
+            ]
+
 
 def _normalize_recommendations(rows: list[dict[str, Any]]) -> list[RecommendationResponse]:
     normalized: list[RecommendationResponse] = []
@@ -152,6 +205,30 @@ def _normalize_recommendations(rows: list[dict[str, Any]]) -> list[Recommendatio
         )
 
     return normalized
+
+
+def _recommend_rows(
+    *,
+    bibcode: str,
+    k: int,
+    mode: Literal["graph", "embed", "hybrid"],
+) -> list[dict[str, Any]]:
+    if mode == "graph":
+        return recommend_similar_papers_graph(
+            seed_bibcode=bibcode,
+            k=k,
+            candidate_pool=max(200, k * 10),
+        )
+    if mode == "embed":
+        return _embedding_recommender().recommend_similar_papers_embedding(
+            seed_bibcode=bibcode,
+            k=k,
+        )
+    return _hybrid_recommender().recommend_similar_papers_hybrid(
+        seed_bibcode=bibcode,
+        k=k,
+        candidate_pool=max(200, k * 10),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -206,23 +283,7 @@ def recommend_paper_endpoint(
     k: int = Query(10, ge=1, le=100),
     mode: Literal["graph", "embed", "hybrid"] = Query("hybrid"),
 ) -> list[RecommendationResponse]:
-    if mode == "graph":
-        rows = recommend_similar_papers_graph(
-            seed_bibcode=bibcode,
-            k=k,
-            candidate_pool=max(200, k * 10),
-        )
-    elif mode == "embed":
-        rows = _embedding_recommender().recommend_similar_papers_embedding(
-            seed_bibcode=bibcode,
-            k=k,
-        )
-    else:
-        rows = _hybrid_recommender().recommend_similar_papers_hybrid(
-            seed_bibcode=bibcode,
-            k=k,
-            candidate_pool=max(200, k * 10),
-        )
+    rows = _recommend_rows(bibcode=bibcode, k=k, mode=mode)
 
     return _normalize_recommendations(rows)
 
@@ -250,3 +311,135 @@ def search_endpoint(
         )
 
     return results
+
+
+@app.get("/subgraph/paper/{bibcode}", response_model=SubgraphResponse)
+def subgraph_endpoint(
+    bibcode: str,
+    k: int = Query(10, ge=1, le=15),
+    mode: Literal["graph", "embed", "hybrid"] = Query("hybrid"),
+    include_citations: bool = Query(False),
+    include_keywords: bool = Query(False),
+    repository: Neo4jRepository = Depends(get_repository),  # noqa: B008
+) -> SubgraphResponse:
+    seed = repository.get_paper(bibcode)
+    if seed is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    rec_rows = _recommend_rows(bibcode=bibcode, k=k, mode=mode)[:k]
+
+    nodes: dict[str, SubgraphNode] = {}
+    edges: list[SubgraphEdge] = []
+    edge_keys: set[tuple[str, str, str]] = set()
+
+    seed_title = seed.get("title") if isinstance(seed.get("title"), str) else bibcode
+    seed_year = seed.get("year") if isinstance(seed.get("year"), int) else None
+    nodes[bibcode] = SubgraphNode(
+        id=bibcode,
+        label=seed_title or bibcode,
+        type="seed",
+        year=seed_year,
+        title=seed_title,
+    )
+
+    visible_bibcodes = [bibcode]
+    for row in rec_rows:
+        rec_bibcode = row.get("bibcode")
+        if not isinstance(rec_bibcode, str):
+            continue
+        visible_bibcodes.append(rec_bibcode)
+
+        title = row.get("title") if isinstance(row.get("title"), str) else rec_bibcode
+        year = row.get("year") if isinstance(row.get("year"), int) else None
+        nodes[rec_bibcode] = SubgraphNode(
+            id=rec_bibcode,
+            label=title or rec_bibcode,
+            type="recommended",
+            year=year,
+            title=title,
+        )
+
+        reasons_raw = row.get("reasons")
+        if isinstance(reasons_raw, list):
+            reasons = [reason for reason in reasons_raw if isinstance(reason, str)]
+        else:
+            reasons = []
+        reason_text = reasons[0] if reasons else "Recommended"
+        edge_key = (bibcode, rec_bibcode, "RECOMMENDS")
+        if edge_key not in edge_keys:
+            edge_keys.add(edge_key)
+            edges.append(
+                SubgraphEdge(
+                    source=bibcode,
+                    target=rec_bibcode,
+                    label=reason_text,
+                    type="RECOMMENDS",
+                )
+            )
+
+    deduped_bibcodes = sorted(set(visible_bibcodes))
+
+    if include_citations:
+        citation_rows = repository.get_citation_edges(deduped_bibcodes, limit=60)
+        for row in citation_rows:
+            source = row.get("source")
+            target = row.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+            if source not in nodes or target not in nodes:
+                continue
+            edge_key = (source, target, "CITES")
+            if edge_key in edge_keys:
+                continue
+            edge_keys.add(edge_key)
+            edges.append(
+                SubgraphEdge(
+                    source=source,
+                    target=target,
+                    label="CITES",
+                    type="CITES",
+                )
+            )
+
+    if include_keywords:
+        keyword_rows = repository.get_keyword_links(deduped_bibcodes, limit=120)
+        per_paper_count: dict[str, int] = {}
+        keyword_nodes_added = 0
+        for row in keyword_rows:
+            paper_id = row.get("bibcode")
+            keyword = row.get("keyword")
+            if not isinstance(paper_id, str) or not isinstance(keyword, str):
+                continue
+            if paper_id not in nodes:
+                continue
+
+            count = per_paper_count.get(paper_id, 0)
+            if count >= 2:
+                continue
+            if keyword_nodes_added >= 30:
+                break
+
+            keyword_id = f"kw::{keyword}"
+            if keyword_id not in nodes:
+                nodes[keyword_id] = SubgraphNode(
+                    id=keyword_id,
+                    label=keyword,
+                    type="keyword",
+                    title=keyword,
+                )
+                keyword_nodes_added += 1
+
+            edge_key = (paper_id, keyword_id, "HAS_KEYWORD")
+            if edge_key not in edge_keys:
+                edge_keys.add(edge_key)
+                edges.append(
+                    SubgraphEdge(
+                        source=paper_id,
+                        target=keyword_id,
+                        label="HAS_KEYWORD",
+                        type="HAS_KEYWORD",
+                    )
+                )
+                per_paper_count[paper_id] = count + 1
+
+    return SubgraphResponse(nodes=list(nodes.values()), edges=edges)

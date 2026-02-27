@@ -21,6 +21,8 @@ dependencies = [
   "fastapi>=0.111",
   "uvicorn>=0.30",
   "streamlit>=1.34",
+  "bleach>=6.1",
+  "pyvis>=0.3.2",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +73,10 @@ module = [
   "uvicorn.*",
   "streamlit",
   "streamlit.*",
+  "bleach",
+  "bleach.*",
+  "pyvis",
+  "pyvis.*",
 ]
 ignore_missing_imports = true
 

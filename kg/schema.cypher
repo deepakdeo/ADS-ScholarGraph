@@ -21,3 +21,7 @@ ON (p.year);
 CREATE INDEX paper_citation_count_idx IF NOT EXISTS
 FOR (p:Paper)
 ON (p.citation_count);
+
+CREATE FULLTEXT INDEX paper_text_idx IF NOT EXISTS
+FOR (p:Paper)
+ON EACH [p.title, p.abstract];

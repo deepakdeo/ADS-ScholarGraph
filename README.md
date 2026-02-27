@@ -173,3 +173,31 @@ LIMIT 10;
      --min-heldout 2 \
      --out docs/eval_report.md
    ```
+
+## Phase 5: FastAPI + Streamlit Demo
+
+1. Build and run all local services:
+   ```bash
+   docker compose up --build
+   ```
+
+2. Open service URLs:
+- Neo4j Browser: http://localhost:7474
+- FastAPI docs: http://localhost:8000/docs
+- Streamlit dashboard: http://localhost:8501
+
+3. API quick checks:
+   ```bash
+   curl http://localhost:8000/health
+   curl "http://localhost:8000/search?q=galaxy&limit=5"
+   curl "http://localhost:8000/recommend/paper/<BIBCODE>?k=10&mode=hybrid"
+   ```
+
+### 2-Minute Demo Script
+
+1. Open Streamlit and search a domain keyword (for example, `quenching`).
+2. Select a seed paper from the dropdown list.
+3. In sidebar, keep `mode=hybrid`, `k=10`, then click **Recommend**.
+4. Show recommendation table with score and reasons.
+5. Expand seed/recommended abstracts to explain why candidates are relevant.
+6. Open FastAPI `/docs` and execute `/recommend/paper/{bibcode}` live to show API-first design.

@@ -1,0 +1,3 @@
+{"bibcode":"2024ApJ...0001A","title":["Paper One"],"author":["Alice A","Bob B"],"pub":"Astrophysical Journal","year":2024,"abstract":"First abstract","doi":["10.1234/example.1"],"citation_count":12,"keyword":["stars","galaxies"]}
+{"bibcode":"2023MNRAS.0002B","title":["Paper Two"],"author":["Bob B","Cara C"],"pub":"MNRAS","year":2023,"abstract":"Second abstract","doi":["10.1234/example.2"],"citation_count":5,"keyword":["galaxies","cosmology"]}
+{"bibcode":"2024ApJ...0001A","author":["Alice A"],"pub":"Astrophysical Journal","keyword":["stars"]}

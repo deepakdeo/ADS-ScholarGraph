@@ -48,5 +48,9 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 check_untyped_defs = true
 
+[[tool.mypy.overrides]]
+module = ["requests", "requests.*", "pandas", "pandas.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -30,3 +30,40 @@ ADS ScholarGraph ingests scholarly metadata and citation links from NASA ADS, bu
 5. Open Neo4j Browser: http://localhost:7474
 
 Use username `neo4j` and the password from `.env`.
+
+## Phase 1: Fetch & Normalize Data
+
+1. Extract raw ADS records into JSON Lines (cached unless `--force`):
+   ```bash
+   python -m ads_scholargraph.pipeline.extract \
+     --query "star" \
+     --rows 200 \
+     --max-results 2000 \
+     --out data/raw/ads_star.jsonl
+   ```
+
+2. Refetch the same file when needed:
+   ```bash
+   python -m ads_scholargraph.pipeline.extract \
+     --query "star" \
+     --rows 200 \
+     --max-results 2000 \
+     --out data/raw/ads_star.jsonl \
+     --force
+   ```
+
+3. Transform raw JSONL into normalized parquet tables:
+   ```bash
+   python -m ads_scholargraph.pipeline.transform \
+     --in data/raw/ads_star.jsonl \
+     --outdir data/processed/ads_star/
+   ```
+
+Expected outputs in `data/processed/ads_star/`:
+- `papers.parquet`
+- `authors.parquet`
+- `paper_authors.parquet`
+- `keywords.parquet`
+- `paper_keywords.parquet`
+- `venues.parquet`
+- `paper_venues.parquet`

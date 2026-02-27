@@ -7,12 +7,12 @@
 ADS ScholarGraph is a local-first scientific literature discovery stack that ingests NASA ADS metadata, builds a Neo4j knowledge graph, computes graph analytics, and serves explainable hybrid recommendations through FastAPI + Streamlit.
 Use it to pick a paper you are reading and instantly get a ranked “what to read next” list with transparent reasons (co-citation, shared community, and abstract similarity), plus an interactive KG view.
 
-## What This Proves
+## Key Features
 
-- Knowledge graph engineering: normalized paper/author/keyword/venue entities + citation edges in Neo4j.
-- Graph analytics: PageRank, community detection, and author-centrality write-back.
-- Recommender systems: graph, embedding, and hybrid ranking with human-readable reasons.
-- Production hygiene: Docker Compose, typed config, CI (`ruff` + `mypy` + `pytest`), modular CLI pipeline.
+- Build and query a Neo4j knowledge graph of papers, authors, keywords, venues, and citation links.
+- Explore paper influence and topic structure using PageRank and community detection outputs.
+- Get explainable recommendations with graph signals, text similarity, and a hybrid ranker.
+- Run the full stack locally with Docker Compose, FastAPI endpoints, and an interactive Streamlit UI.
 
 ## Demo Screenshots
 

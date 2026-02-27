@@ -67,3 +67,43 @@ Expected outputs in `data/processed/ads_star/`:
 - `paper_keywords.parquet`
 - `venues.parquet`
 - `paper_venues.parquet`
+
+## Phase 2: Expand Citations & Load Neo4j
+
+1. Expand citation edges from seed papers:
+   ```bash
+   python -m ads_scholargraph.pipeline.expand_citations \
+     --seed data/processed/ads_star/papers.parquet \
+     --mode references \
+     --max-per-paper 200 \
+     --out data/processed/ads_star/citations.parquet
+   ```
+   Recompute only when needed:
+   ```bash
+   python -m ads_scholargraph.pipeline.expand_citations \
+     --seed data/processed/ads_star/papers.parquet \
+     --mode references \
+     --max-per-paper 200 \
+     --out data/processed/ads_star/citations.parquet \
+     --force
+   ```
+
+2. Start Neo4j (Docker Desktop must be running):
+   ```bash
+   docker compose up -d
+   ```
+
+3. Load processed tables into Neo4j:
+   ```bash
+   python -m ads_scholargraph.pipeline.load_neo4j \
+     --indir data/processed/ads_star/ \
+     --wipe
+   ```
+
+4. Open Neo4j Browser at http://localhost:7474 and run queries from `kg/queries.cypher`, for example:
+   ```cypher
+   MATCH (p:Paper)
+   RETURN p.bibcode, p.title, p.citation_count
+   ORDER BY p.citation_count DESC
+   LIMIT 20;
+   ```

@@ -1,212 +1,133 @@
 # ADS ScholarGraph
 
-Production-style scaffold for a NASA ADS-powered knowledge graph and scientific literature recommendation system.
+[![CI](https://github.com/deepakdeo/ADS-ScholarGraph/actions/workflows/ci.yml/badge.svg)](https://github.com/deepakdeo/ADS-ScholarGraph/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## What This Project Is
+ADS ScholarGraph is a local-first scientific literature discovery stack that ingests NASA ADS metadata, builds a Neo4j knowledge graph, computes graph analytics, and serves explainable hybrid recommendations through FastAPI + Streamlit.
 
-ADS ScholarGraph ingests scholarly metadata and citation links from NASA ADS, builds a Neo4j knowledge graph, and serves hybrid recommendations through an API and demo app. This repository currently implements data ingestion/normalization, citation expansion, Neo4j loading, and graph analytics feature write-back (Phases 0-3).
+## What This Proves
 
-## Quickstart
+- Knowledge graph engineering: normalized paper/author/keyword/venue entities + citation edges in Neo4j.
+- Graph analytics: PageRank, community detection, and author-centrality write-back.
+- Recommender systems: graph, embedding, and hybrid ranking with human-readable reasons.
+- Production hygiene: Docker Compose, typed config, CI (`ruff` + `mypy` + `pytest`), modular CLI pipeline.
 
-1. Copy environment template and set credentials:
+## Demo Screenshots
+
+![Streamlit UI](docs/assets/streamlit_ui.png)
+
+![Knowledge Graph View](docs/assets/graph_view.png)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[NASA ADS API] --> B[Extract / Transform]
+    B --> C[Neo4j KG]
+    C --> D[Graph Analytics]
+    D --> E[Recommenders\nGraph + Embedding + Hybrid]
+    C --> E
+    E --> F[FastAPI]
+    F --> G[Streamlit]
+```
+
+## Quickstart (Local Demo)
+
+This path assumes you already have processed data (example: `data/processed/quenching/`).
+
+1. Create local environment file:
    ```bash
    cp .env.example .env
    ```
-   Set `NEO4J_PASSWORD` (and `ADS_API_TOKEN` when available) in `.env`.
-2. Start Neo4j:
+2. Set `NEO4J_PASSWORD` in `.env`.
+3. Start services:
    Ensure Docker Desktop is running first.
    ```bash
-   docker compose up -d
+   docker compose up --build
    ```
-3. Install project with development tooling:
+4. In a second terminal, install project tooling:
    ```bash
    python -m pip install --upgrade pip
    pip install -e ".[dev]"
    ```
-4. Run tests:
-   ```bash
-   pytest
-   ```
-5. Open Neo4j Browser: http://localhost:7474
-
-Use username `neo4j` and the password from `.env`.
-
-## Phase 1: Fetch & Normalize Data
-
-1. Extract raw ADS records into JSON Lines (cached unless `--force`):
-   ```bash
-   python -m ads_scholargraph.pipeline.extract \
-     --query "star" \
-     --rows 200 \
-     --max-results 2000 \
-     --out data/raw/ads_star.jsonl
-   ```
-
-2. Refetch the same file when needed:
-   ```bash
-   python -m ads_scholargraph.pipeline.extract \
-     --query "star" \
-     --rows 200 \
-     --max-results 2000 \
-     --out data/raw/ads_star.jsonl \
-     --force
-   ```
-
-3. Transform raw JSONL into normalized parquet tables:
-   ```bash
-   python -m ads_scholargraph.pipeline.transform \
-     --in data/raw/ads_star.jsonl \
-     --outdir data/processed/ads_star/
-   ```
-
-Expected outputs in `data/processed/ads_star/`:
-- `papers.parquet`
-- `authors.parquet`
-- `paper_authors.parquet`
-- `keywords.parquet`
-- `paper_keywords.parquet`
-- `venues.parquet`
-- `paper_venues.parquet`
-
-## Phase 2: Expand Citations & Load Neo4j
-
-1. Expand citation edges from seed papers:
-   ```bash
-   python -m ads_scholargraph.pipeline.expand_citations \
-     --seed data/processed/ads_star/papers.parquet \
-     --mode references \
-     --max-per-paper 200 \
-     --out data/processed/ads_star/citations.parquet
-   ```
-   Recompute only when needed:
-   ```bash
-   python -m ads_scholargraph.pipeline.expand_citations \
-     --seed data/processed/ads_star/papers.parquet \
-     --mode references \
-     --max-per-paper 200 \
-     --out data/processed/ads_star/citations.parquet \
-     --force
-   ```
-
-2. Start Neo4j (Docker Desktop must be running):
-   ```bash
-   docker compose up -d
-   ```
-
-3. Load processed tables into Neo4j:
+5. Load the existing processed dataset into Neo4j:
    ```bash
    python -m ads_scholargraph.pipeline.load_neo4j \
-     --indir data/processed/ads_star/ \
+     --indir data/processed/quenching \
      --wipe
    ```
-
-4. Open Neo4j Browser at http://localhost:7474 and run queries from `kg/queries.cypher`, for example:
-   ```cypher
-   MATCH (p:Paper)
-   RETURN p.bibcode, p.title, p.citation_count
-   ORDER BY p.citation_count DESC
-   LIMIT 20;
-   ```
-
-## Phase 3: Graph Analytics
-
-1. Ensure Neo4j is running and Phase 2 load is complete.
-
-2. Run analytics in auto mode (try GDS first, then fall back to NetworkX):
+6. Run graph analytics:
    ```bash
    python -m ads_scholargraph.graph_analytics.run_analytics --mode auto
    ```
-
-3. Optionally force a mode:
-   ```bash
-   python -m ads_scholargraph.graph_analytics.run_analytics --mode gds
-   python -m ads_scholargraph.graph_analytics.run_analytics --mode networkx
-   ```
-
-4. Inspect analytics properties in Neo4j Browser using `kg/queries.cypher`, including:
-- top papers by `pagerank`
-- community size distribution by `community_id`
-- top authors by `betweenness`
-
-Example seed-only PageRank check:
-```cypher
-MATCH (p:Paper)
-WHERE p.is_seed = true AND p.title IS NOT NULL
-RETURN p.bibcode, p.title, p.pagerank
-ORDER BY p.pagerank DESC
-LIMIT 10;
-```
-
-## Phase 4: Recommendations + Offline Evaluation
-
-1. Graph recommendations:
-   ```bash
-   python -m ads_scholargraph.recsys.cli \
-     --bibcode <BIBCODE> \
-     --k 10 \
-     --mode graph
-   ```
-
-2. Embedding recommendations (TF-IDF over title+abstract, cached under `.cache/`):
-   ```bash
-   python -m ads_scholargraph.recsys.cli \
-     --bibcode <BIBCODE> \
-     --k 10 \
-     --mode embed
-   ```
-
-3. Hybrid recommendations:
-   ```bash
-   python -m ads_scholargraph.recsys.cli \
-     --bibcode <BIBCODE> \
-     --k 10 \
-     --mode hybrid \
-     --candidate-pool 200
-   ```
-
-4. Offline evaluation report:
-   ```bash
-   python -m ads_scholargraph.recsys.eval \
-     --citations data/processed/ads_star/citations.parquet \
-     --k 10 \
-     --holdout-fraction 0.2 \
-     --min-heldout 2 \
-     --out docs/eval_report.md
-   ```
-
-## Phase 5: FastAPI + Streamlit Demo
-
-1. Build and run all local services:
-   ```bash
-   docker compose up --build
-   ```
-
-2. Open service URLs:
+7. Open apps:
+- Streamlit: http://localhost:8501
+- API docs: http://localhost:8000/docs
 - Neo4j Browser: http://localhost:7474
-- FastAPI docs: http://localhost:8000/docs
-- Streamlit dashboard: http://localhost:8501
 
-Phase 5.5 polish included:
-- sanitized abstract rendering (`<sub>/<sup>` and basic formatting preserved safely)
-- interactive **Graph View** tab (seed + recommendations with labeled edges)
-- Phase 5.6 graph clarity polish:
-  - short node labels by default with configurable max label length
-  - rich hover tooltips (full title, bibcode, year, score, reasons)
-  - recruiter-clean legend, tuned layout physics, optional edge labels, and node detail inspector
+Note: `ADS_API_TOKEN` is only required for data extraction/expansion. The API/UI demo runs from Neo4j-loaded data.
 
-3. API quick checks:
+## Data Ingestion (Reproduce Dataset Locally)
+
+`data/` is gitignored and not committed. Generate all datasets locally.
+
+1. Set ADS token in `.env`:
+   ```env
+   ADS_API_TOKEN=your_token_here
+   ```
+2. Phase 1 extract raw ADS JSONL:
    ```bash
-   curl http://localhost:8000/health
-   curl "http://localhost:8000/search?q=galaxy&limit=5"
-   curl "http://localhost:8000/recommend/paper/<BIBCODE>?k=10&mode=hybrid"
+   python -m ads_scholargraph.pipeline.extract \
+     --query "quenching" \
+     --rows 200 \
+     --max-results 2000 \
+     --out data/raw/ads_quenching.jsonl
+   ```
+3. Phase 1 transform to normalized parquet tables:
+   ```bash
+   python -m ads_scholargraph.pipeline.transform \
+     --in data/raw/ads_quenching.jsonl \
+     --outdir data/processed/quenching
+   ```
+4. Phase 2 expand citation/reference edges:
+   ```bash
+   python -m ads_scholargraph.pipeline.expand_citations \
+     --seed data/processed/quenching/papers.parquet \
+     --mode references \
+     --max-per-paper 200 \
+     --out data/processed/quenching/citations.parquet
+   ```
+5. Phase 2 load KG into Neo4j:
+   ```bash
+   python -m ads_scholargraph.pipeline.load_neo4j \
+     --indir data/processed/quenching \
+     --wipe
    ```
 
-### 2-Minute Demo Script
+## Key CLI Commands
 
-1. Open Streamlit and search a domain keyword (for example, `quenching`).
-2. Select a seed paper from the dropdown list.
-3. In sidebar, keep `mode=hybrid`, `k=10`, then click **Recommend**.
-4. Show recommendation table with score and reasons.
-5. Open **Graph View** to visualize the local recommendation subgraph.
-6. Expand seed/recommended abstracts to explain why candidates are relevant.
-7. Open FastAPI `/docs` and execute `/subgraph/paper/{bibcode}` live to show API-first design.
+- [Extract](src/ads_scholargraph/pipeline/extract.py): `python -m ads_scholargraph.pipeline.extract --help`
+- [Transform](src/ads_scholargraph/pipeline/transform.py): `python -m ads_scholargraph.pipeline.transform --help`
+- [Expand citations](src/ads_scholargraph/pipeline/expand_citations.py): `python -m ads_scholargraph.pipeline.expand_citations --help`
+- [Load Neo4j](src/ads_scholargraph/pipeline/load_neo4j.py): `python -m ads_scholargraph.pipeline.load_neo4j --help`
+- [Run analytics](src/ads_scholargraph/graph_analytics/run_analytics.py): `python -m ads_scholargraph.graph_analytics.run_analytics --help`
+- [Recommendations CLI](src/ads_scholargraph/recsys/cli.py): `python -m ads_scholargraph.recsys.cli --help`
+- [Offline evaluation](src/ads_scholargraph/recsys/eval.py): `python -m ads_scholargraph.recsys.eval --help`
+
+Offline evaluation report: [docs/eval_report.md](docs/eval_report.md)
+
+## 2-Minute Demo Script
+
+1. Open Streamlit and search a topic (for example: `quenching`).
+2. Pick a seed paper from the dropdown.
+3. Keep mode `hybrid`, set `k=10`, click **Recommend**.
+4. Show score + reasons in the recommendation table.
+5. Open **Graph View** and highlight seed vs recommended papers.
+6. Hover nodes to show full title, year, bibcode, and recommendation reasons.
+7. Use the node detail selector to open abstract previews.
+8. Open FastAPI docs and run `/recommend/paper/{bibcode}` and `/subgraph/paper/{bibcode}`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

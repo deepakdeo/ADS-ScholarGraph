@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ADS ScholarGraph is a local-first scientific literature discovery stack that ingests NASA ADS metadata, builds a Neo4j knowledge graph, computes graph analytics, and serves explainable hybrid recommendations through FastAPI + Streamlit.
+Use it to pick a paper you are reading and instantly get a ranked “what to read next” list with transparent reasons (co-citation, shared community, and abstract similarity), plus an interactive KG view.
 
 ## What This Proves
 
@@ -26,7 +27,7 @@ flowchart LR
     A[NASA ADS API] --> B[Extract / Transform]
     B --> C[Neo4j KG]
     C --> D[Graph Analytics]
-    D --> E[Recommenders\nGraph + Embedding + Hybrid]
+    D --> E[Recommenders<br/>Graph + Embedding + Hybrid]
     C --> E
     E --> F[FastAPI]
     F --> G[Streamlit]

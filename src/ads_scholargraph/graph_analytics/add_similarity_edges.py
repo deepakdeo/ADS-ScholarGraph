@@ -5,15 +5,22 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeVar
 
 from ads_scholargraph.config import get_settings
 
 if TYPE_CHECKING:
-    from neo4j import Driver, Session
+    from neo4j import Session
 else:
-    Driver = Any
     Session = Any
+
+
+class DriverLike(Protocol):
+    """Minimal driver interface required by similarity edge pipeline."""
+
+    def session(self) -> Session: ...
+
+    def close(self) -> None: ...
 
 _graph_database: Any | None
 try:
@@ -180,7 +187,7 @@ def add_similarity_edges(
     max_features: int = 50000,
     wipe_existing: bool = False,
     batch_size: int = 1000,
-    driver: Driver | None = None,
+    driver: DriverLike | None = None,
 ) -> dict[str, Any]:
     """Compute and write bounded `SIMILAR_TO` edges to Neo4j."""
 

@@ -71,7 +71,15 @@ This path assumes you already have processed data (example: `data/processed/quen
    ```bash
    python -m ads_scholargraph.graph_analytics.run_analytics --mode auto
    ```
-7. Open apps:
+7. Optional: materialize bounded similarity edges:
+   ```bash
+   python -m ads_scholargraph.graph_analytics.add_similarity_edges \
+     --threshold 0.30 \
+     --top-k 5 \
+     --seed-only \
+     --wipe-existing
+   ```
+8. Open apps:
 - Streamlit: http://localhost:8501
 - API docs: http://localhost:8000/docs
 - Neo4j Browser: http://localhost:7474
@@ -125,6 +133,7 @@ Note: `ADS_API_TOKEN` is only required for data extraction/expansion. The API/UI
 - [Expand citations](src/ads_scholargraph/pipeline/expand_citations.py): `python -m ads_scholargraph.pipeline.expand_citations --help`
 - [Load Neo4j](src/ads_scholargraph/pipeline/load_neo4j.py): `python -m ads_scholargraph.pipeline.load_neo4j --help`
 - [Run analytics](src/ads_scholargraph/graph_analytics/run_analytics.py): `python -m ads_scholargraph.graph_analytics.run_analytics --help`
+- [Add similarity edges](src/ads_scholargraph/graph_analytics/add_similarity_edges.py): `python -m ads_scholargraph.graph_analytics.add_similarity_edges --help`
 - [Recommendations CLI](src/ads_scholargraph/recsys/cli.py): `python -m ads_scholargraph.recsys.cli --help`
 - [Offline evaluation](src/ads_scholargraph/recsys/eval.py): `python -m ads_scholargraph.recsys.eval --help`
 

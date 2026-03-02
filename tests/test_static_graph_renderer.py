@@ -34,3 +34,17 @@ def test_graph_to_gexf_bytes_serializes_graph() -> None:
     assert "<gexf" in text
     assert "B1" in text
     assert "R1" in text
+
+
+def test_graph_to_gexf_bytes_ignores_none_attributes() -> None:
+    graph = nx.DiGraph()
+    graph.add_node("seed", label="Seed", type="seed", title=None, year=None)
+    graph.add_node("rec", label="Rec", type=None)
+    graph.add_edge("seed", "rec", type="RECOMMENDS", label=None, score=None)
+
+    payload = graph_to_gexf_bytes(graph)
+    text = payload.decode("utf-8")
+
+    assert "<gexf" in text
+    assert "seed" in text
+    assert "rec" in text

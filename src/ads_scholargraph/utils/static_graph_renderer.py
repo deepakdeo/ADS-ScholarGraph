@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+from typing import Any
 
 import networkx as nx
 
@@ -124,4 +125,41 @@ def render_static_graph_svg(
 def graph_to_gexf_bytes(graph: nx.Graph) -> bytes:
     """Serialize a graph to GEXF bytes for download/export."""
 
-    return "\n".join(nx.generate_gexf(graph, prettyprint=True)).encode("utf-8")
+    sanitized_graph = graph.__class__()
+
+    for key, value in graph.graph.items():
+        sanitized = _sanitize_gexf_value(value)
+        if sanitized is not None:
+            sanitized_graph.graph[key] = sanitized
+
+    for node, attrs in graph.nodes(data=True):
+        clean_attrs = _sanitize_gexf_attrs(attrs)
+        sanitized_graph.add_node(node, **clean_attrs)
+
+    if graph.is_multigraph():
+        for source, target, edge_key, attrs in graph.edges(keys=True, data=True):
+            clean_attrs = _sanitize_gexf_attrs(attrs)
+            sanitized_graph.add_edge(source, target, key=edge_key, **clean_attrs)
+    else:
+        for source, target, attrs in graph.edges(data=True):
+            clean_attrs = _sanitize_gexf_attrs(attrs)
+            sanitized_graph.add_edge(source, target, **clean_attrs)
+
+    return "\n".join(nx.generate_gexf(sanitized_graph, prettyprint=True)).encode("utf-8")
+
+
+def _sanitize_gexf_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    clean: dict[str, Any] = {}
+    for key, value in attrs.items():
+        sanitized = _sanitize_gexf_value(value)
+        if sanitized is not None:
+            clean[str(key)] = sanitized
+    return clean
+
+
+def _sanitize_gexf_value(value: Any) -> str | int | float | bool | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)

@@ -25,6 +25,8 @@ MAX_GRAPH_RECS = 15
 GRAPH_HEIGHT_PX = 680
 SIMILARITY_DEFAULT_THRESHOLD = 0.30
 SIMILARITY_DEFAULT_TOP_K = 5
+STATE_PAYLOAD_KEY = "ads_scholargraph_payload"
+STATE_SIGNATURE_KEY = "ads_scholargraph_signature"
 
 
 def _api_get(path: str, params: dict[str, Any] | None = None) -> Any:
@@ -125,6 +127,27 @@ def _safe_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _build_request_signature(
+    *,
+    bibcode: str,
+    mode: str,
+    k: int,
+    graph_k: int,
+    include_citations: bool,
+    include_keywords: bool,
+    include_similarity: bool,
+) -> tuple[str, str, int, int, bool, bool, bool]:
+    return (
+        bibcode,
+        mode,
+        k,
+        graph_k,
+        include_citations,
+        include_keywords,
+        include_similarity,
+    )
 
 
 def _filter_subgraph(
@@ -269,13 +292,22 @@ def _build_networkx_from_subgraph(
         if not isinstance(node_id, str):
             continue
         detail = details_by_id.get(node_id, {})
+        node_attrs: dict[str, Any] = {
+            "label": _node_display_label(node, show_full_titles=False, max_label_len=40),
+            "highlighted": node_id in highlighted_nodes,
+        }
+        node_type = node.get("type")
+        if isinstance(node_type, str):
+            node_attrs["type"] = node_type
+        title = detail.get("title")
+        if isinstance(title, str):
+            node_attrs["title"] = title
+        year = detail.get("year")
+        if isinstance(year, int):
+            node_attrs["year"] = year
         graph.add_node(
             node_id,
-            label=_node_display_label(node, show_full_titles=False, max_label_len=40),
-            type=node.get("type"),
-            highlighted=node_id in highlighted_nodes,
-            title=detail.get("title"),
-            year=detail.get("year"),
+            **node_attrs,
         )
 
     for edge in subgraph.get("edges", []):
@@ -584,48 +616,95 @@ def main() -> None:
         st.error("Selected paper has an invalid bibcode.")
         return
 
+    graph_k = min(k, max_graph_recs, MAX_GRAPH_RECS)
+    request_signature = _build_request_signature(
+        bibcode=selected_bibcode,
+        mode=mode,
+        k=k,
+        graph_k=graph_k,
+        include_citations=include_citations,
+        include_keywords=include_keywords,
+        include_similarity=include_similarity,
+    )
+
     trigger = st.button("Recommend", type="primary")
 
-    if not trigger:
+    if trigger:
+        try:
+            seed_detail = _api_get(f"/paper/{selected_bibcode}")
+            recs = _api_get(
+                f"/recommend/paper/{selected_bibcode}",
+                params={"k": k, "mode": mode},
+            )
+            graph_data = _api_get(
+                f"/subgraph/paper/{selected_bibcode}",
+                params={
+                    "k": graph_k,
+                    "mode": mode,
+                    "include_citations": include_citations,
+                    "include_keywords": include_keywords,
+                    "include_similarity": include_similarity,
+                },
+            )
+        except requests.RequestException as exc:
+            st.error(f"Recommendation request failed: {exc}")
+        else:
+            stats_overview: dict[str, Any] = {}
+            stats_error: str | None = None
+            try:
+                stats_payload = _api_get("/stats/overview")
+                if isinstance(stats_payload, dict):
+                    stats_overview = stats_payload
+            except requests.RequestException as exc:
+                stats_error = str(exc)
+
+            st.session_state[STATE_PAYLOAD_KEY] = {
+                "selected_bibcode": selected_bibcode,
+                "seed_detail": seed_detail,
+                "recs": recs,
+                "graph_data": graph_data,
+                "stats_overview": stats_overview,
+                "stats_error": stats_error,
+            }
+            st.session_state[STATE_SIGNATURE_KEY] = request_signature
+
+    cached_payload_raw = st.session_state.get(STATE_PAYLOAD_KEY)
+    if not isinstance(cached_payload_raw, dict):
+        st.info("Click Recommend to fetch recommendations and graph data.")
         return
 
-    graph_k = min(k, max_graph_recs, MAX_GRAPH_RECS)
+    cached_signature = st.session_state.get(STATE_SIGNATURE_KEY)
+    if cached_signature != request_signature:
+        cached_for = cached_payload_raw.get("selected_bibcode")
+        if isinstance(cached_for, str):
+            st.info(
+                "Settings changed. Showing cached results for "
+                f"`{cached_for}` until you click Recommend again."
+            )
+        else:
+            st.info("Settings changed. Click Recommend to refresh data.")
 
-    try:
-        seed_detail = _api_get(f"/paper/{selected_bibcode}")
-        recs = _api_get(
-            f"/recommend/paper/{selected_bibcode}",
-            params={"k": k, "mode": mode},
-        )
-        graph_data = _api_get(
-            f"/subgraph/paper/{selected_bibcode}",
-            params={
-                "k": graph_k,
-                "mode": mode,
-                "include_citations": include_citations,
-                "include_keywords": include_keywords,
-                "include_similarity": include_similarity,
-            },
-        )
-    except requests.RequestException as exc:
-        st.error(f"Recommendation request failed: {exc}")
+    seed_detail_raw = cached_payload_raw.get("seed_detail")
+    graph_data_raw = cached_payload_raw.get("graph_data")
+    recs_raw = cached_payload_raw.get("recs")
+    stats_overview_raw = cached_payload_raw.get("stats_overview")
+    stats_error_raw = cached_payload_raw.get("stats_error")
+
+    if not isinstance(seed_detail_raw, dict):
+        st.error("Cached seed payload is invalid. Click Recommend to reload.")
         return
 
-    stats_overview: dict[str, Any] = {}
-    stats_error: str | None = None
-    try:
-        stats_payload = _api_get("/stats/overview")
-        if isinstance(stats_payload, dict):
-            stats_overview = stats_payload
-    except requests.RequestException as exc:
-        stats_error = str(exc)
+    seed_detail = seed_detail_raw
+    graph_data = graph_data_raw if isinstance(graph_data_raw, dict) else {}
+    recs = recs_raw if isinstance(recs_raw, list) else []
+    stats_overview = stats_overview_raw if isinstance(stats_overview_raw, dict) else {}
+    stats_error = stats_error_raw if isinstance(stats_error_raw, str) else None
 
     with st.expander("Seed paper abstract", expanded=False):
         _render_abstract(seed_detail.get("abstract"))
 
     if not recs:
         st.warning("No recommendations returned for this seed paper.")
-        return
 
     table_rows: list[dict[str, Any]] = []
     for rec in recs:
@@ -803,7 +882,6 @@ def main() -> None:
 
         if not filtered_node_dicts:
             st.warning("No nodes match the active filters. Relax filters to view the graph.")
-            return
         if include_similarity:
             st.caption(
                 f"Similarity edges visible: {similarity_edge_count} "

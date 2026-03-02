@@ -558,38 +558,37 @@ def main() -> None:
     st.sidebar.header("Recommendation Settings")
     mode = st.sidebar.selectbox("Mode", options=["hybrid", "graph", "embed"], index=0)
     k = st.sidebar.slider("Top-K", min_value=3, max_value=30, value=10, step=1)
-
-    with st.sidebar.expander("Graph Display", expanded=False):
-        max_graph_recs = st.slider(
-            "Max nodes in graph (recommendations)",
-            min_value=3,
-            max_value=MAX_GRAPH_RECS,
-            value=10,
-            step=1,
-        )
-        show_full_titles = st.checkbox("Show full titles on graph nodes", value=False)
-        max_label_len = st.slider(
-            "Max label length",
-            min_value=30,
-            max_value=100,
-            value=60,
-            step=5,
-        )
-        enable_physics = st.checkbox("Enable physics", value=True)
-        stabilization_iterations = st.slider(
-            "Stabilize iterations",
-            min_value=50,
-            max_value=500,
-            value=180,
-            step=10,
-            disabled=not enable_physics,
-        )
-        show_edge_labels = st.checkbox("Show edge labels", value=False)
-
-    with st.sidebar.expander("Graph Enrichments", expanded=False):
-        include_citations = st.checkbox("Include citation edges", value=False)
-        include_keywords = st.checkbox("Include keyword nodes", value=False)
-        include_similarity = st.checkbox("Include similarity edges", value=False)
+    st.sidebar.markdown("### Graph Display")
+    max_graph_recs = st.sidebar.slider(
+        "Max nodes in graph (recommendations)",
+        min_value=3,
+        max_value=MAX_GRAPH_RECS,
+        value=10,
+        step=1,
+    )
+    show_full_titles = st.sidebar.checkbox("Show full titles on graph nodes", value=False)
+    max_label_len = st.sidebar.slider(
+        "Max label length",
+        min_value=30,
+        max_value=100,
+        value=60,
+        step=5,
+    )
+    enable_physics = st.sidebar.checkbox("Enable physics", value=True)
+    stabilization_iterations = st.sidebar.slider(
+        "Stabilize iterations",
+        min_value=50,
+        max_value=500,
+        value=180,
+        step=10,
+        disabled=not enable_physics,
+    )
+    show_edge_labels = st.sidebar.checkbox("Show edge labels", value=False)
+    st.sidebar.markdown("### Graph Enrichments")
+    include_citations = st.sidebar.checkbox("Include citation edges", value=False)
+    include_keywords = st.sidebar.checkbox("Include keyword nodes", value=False)
+    include_similarity = st.sidebar.checkbox("Include similarity edges", value=False)
+    with st.sidebar.expander("Similarity Controls", expanded=False):
         st.caption(
             "SIMILAR_TO edges are generated offline from TF-IDF similarity over title+abstract. "
             f"Threshold: >= {SIMILARITY_DEFAULT_THRESHOLD:.2f}, "

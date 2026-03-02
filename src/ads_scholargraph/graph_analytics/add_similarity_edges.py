@@ -5,20 +5,25 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeVar
+from typing import Any, Protocol, TypedDict, TypeVar
 
 from ads_scholargraph.config import get_settings
 
-if TYPE_CHECKING:
-    from neo4j import Session
-else:
-    Session = Any
+
+class SessionLike(Protocol):
+    """Minimal session contract used by this module."""
+
+    def run(self, query: str, **kwargs: Any) -> Any: ...
+
+    def __enter__(self) -> SessionLike: ...
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None: ...
 
 
 class DriverLike(Protocol):
     """Minimal driver interface required by similarity edge pipeline."""
 
-    def session(self) -> Session: ...
+    def session(self) -> SessionLike: ...
 
     def close(self) -> None: ...
 
@@ -75,7 +80,7 @@ def _batched(rows: list[_RowT], batch_size: int) -> Iterator[list[_RowT]]:
 
 
 def _fetch_paper_rows(
-    session: Session,
+    session: SessionLike,
     *,
     seed_only: bool,
     limit: int,
@@ -165,7 +170,7 @@ def _compute_similarity_edges(
 
 
 def _write_similarity_edges(
-    session: Session,
+    session: SessionLike,
     *,
     rows: list[SimilarityEdge],
     batch_size: int,

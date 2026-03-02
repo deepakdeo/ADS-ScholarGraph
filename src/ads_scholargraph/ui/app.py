@@ -451,6 +451,11 @@ def _render_subgraph(
         elif edge_type == "RECOMMENDS":
             color = "#f59e0b"
             width = 2.2
+        elif edge_type == "SIMILAR_TO":
+            similarity = edge.get("similarity")
+            similarity_score = float(similarity) if isinstance(similarity, (int, float)) else 0.0
+            color = "#ec4899"
+            width = 1.2 + (2.5 * min(max(similarity_score, 0.0), 1.0))
         dashes = edge_type == "HAS_KEYWORD"
         if (source, target) in highlighted_edges:
             color = "#ef4444"
@@ -541,6 +546,7 @@ def main() -> None:
     st.sidebar.markdown("### Graph enrichments")
     include_citations = st.sidebar.checkbox("Include citation edges", value=False)
     include_keywords = st.sidebar.checkbox("Include keyword nodes", value=False)
+    include_similarity = st.sidebar.checkbox("Include similarity edges", value=False)
 
     query = st.text_input("Search seed papers (title/abstract keywords)", value="")
 
@@ -584,6 +590,7 @@ def main() -> None:
                 "mode": mode,
                 "include_citations": include_citations,
                 "include_keywords": include_keywords,
+                "include_similarity": include_similarity,
             },
         )
     except requests.RequestException as exc:
@@ -764,6 +771,7 @@ def main() -> None:
               <span><b style="color:#f59e0b;">━</b> Recommendation edge</span>
               <span><b style="color:#94a3b8;">━</b> CITES edge</span>
               <span><b style="color:#9ca3af;">┈</b> HAS_KEYWORD edge</span>
+              <span><b style="color:#ec4899;">━</b> SIMILAR_TO edge</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -964,6 +972,7 @@ def main() -> None:
         st.caption(
             "Entity counts are from /stats/overview. "
             "Relationships shown: CITES, WROTE, HAS_KEYWORD, PUBLISHED_IN."
+            " Similarity enrichment is optional via SIMILAR_TO edges."
         )
 
 

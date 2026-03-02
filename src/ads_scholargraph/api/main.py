@@ -69,7 +69,8 @@ class SubgraphEdge(BaseModel):
     source: str
     target: str
     label: str
-    type: Literal["RECOMMENDS", "CITES", "HAS_KEYWORD"]
+    type: Literal["RECOMMENDS", "CITES", "HAS_KEYWORD", "SIMILAR_TO"]
+    similarity: float | None = None
 
 
 class SubgraphResponse(BaseModel):
@@ -211,6 +212,27 @@ class Neo4jRepository:
         WHERE p.bibcode IN $bibcodes
         RETURN p.bibcode AS bibcode, k.name AS keyword
         ORDER BY keyword ASC
+        LIMIT $limit
+        """
+        with self._driver.session() as session:
+            return [
+                dict(record)
+                for record in session.run(query, bibcodes=bibcodes, limit=limit)
+            ]
+
+    def get_similarity_edges(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
+        if not bibcodes:
+            return []
+
+        query = """
+        MATCH (src:Paper)-[r:SIMILAR_TO]-(dst:Paper)
+        WHERE src.bibcode IN $bibcodes
+          AND dst.bibcode IN $bibcodes
+          AND src.bibcode < dst.bibcode
+        RETURN src.bibcode AS source,
+               dst.bibcode AS target,
+               coalesce(r.similarity, 0.0) AS similarity
+        ORDER BY similarity DESC
         LIMIT $limit
         """
         with self._driver.session() as session:
@@ -526,6 +548,7 @@ def subgraph_endpoint(
     mode: Literal["graph", "embed", "hybrid"] = Query("hybrid"),
     include_citations: bool = Query(False),
     include_keywords: bool = Query(False),
+    include_similarity: bool = Query(False),
     repository: Neo4jRepository = Depends(get_repository),  # noqa: B008
 ) -> SubgraphResponse:
     seed = repository.get_paper(bibcode)
@@ -647,5 +670,31 @@ def subgraph_endpoint(
                     )
                 )
                 per_paper_count[paper_id] = count + 1
+
+    if include_similarity:
+        similarity_rows = repository.get_similarity_edges(deduped_bibcodes, limit=80)
+        for row in similarity_rows:
+            source = row.get("source")
+            target = row.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+            if source not in nodes or target not in nodes:
+                continue
+
+            similarity_raw = row.get("similarity")
+            similarity = float(similarity_raw) if isinstance(similarity_raw, (int, float)) else 0.0
+            edge_key = (source, target, "SIMILAR_TO")
+            if edge_key in edge_keys:
+                continue
+            edge_keys.add(edge_key)
+            edges.append(
+                SubgraphEdge(
+                    source=source,
+                    target=target,
+                    label=f"SIMILAR ({similarity:.2f})",
+                    type="SIMILAR_TO",
+                    similarity=similarity,
+                )
+            )
 
     return SubgraphResponse(nodes=list(nodes.values()), edges=edges)

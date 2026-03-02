@@ -31,6 +31,9 @@ class _FakeRepository:
     def get_keyword_links(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
         return [{"bibcode": "R1", "keyword": "quenching"}]
 
+    def get_similarity_edges(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
+        return [{"source": "R1", "target": "R2", "similarity": 0.44}]
+
     def get_graph_stats_summary(self) -> dict[str, Any]:
         return {
             "paper_count": 3,
@@ -145,6 +148,7 @@ def test_subgraph_endpoint(monkeypatch) -> None:
                 "mode": "graph",
                 "include_citations": True,
                 "include_keywords": True,
+                "include_similarity": True,
             },
         )
         assert resp.status_code == 200
@@ -158,6 +162,7 @@ def test_subgraph_endpoint(monkeypatch) -> None:
         assert "RECOMMENDS" in edge_types
         assert "CITES" in edge_types
         assert "HAS_KEYWORD" in edge_types
+        assert "SIMILAR_TO" in edge_types
     finally:
         app.dependency_overrides.clear()
 

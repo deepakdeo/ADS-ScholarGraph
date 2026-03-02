@@ -48,7 +48,7 @@ def test_graph_recommender_scores_and_reasons() -> None:
     )
 
     assert [rec["bibcode"] for rec in recs] == ["A", "B"]
-    assert any("Same community (2)" in reason for reason in recs[0]["reasons"])
+    assert any("Same research cluster" in reason for reason in recs[0]["reasons"])
     assert any("Shares 4 references" in reason for reason in recs[0]["reasons"])
     assert recs[0]["score"] > recs[1]["score"]
     assert recs[0]["pagerank"] == 0.5

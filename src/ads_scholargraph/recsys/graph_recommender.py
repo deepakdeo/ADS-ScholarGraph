@@ -131,7 +131,7 @@ def _score_candidates(candidates: list[GraphCandidate]) -> list[dict[str, Any]]:
 
         reasons: list[str] = []
         if candidate.same_community and candidate.community_id is not None:
-            reasons.append(f"Same community ({candidate.community_id})")
+            reasons.append("Same research cluster")
         if candidate.shared_references > 0:
             reasons.append(f"Shares {candidate.shared_references} references")
         if candidate.co_citation_overlap > 0:

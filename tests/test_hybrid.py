@@ -21,7 +21,7 @@ def test_hybrid_combines_graph_and_embedding(monkeypatch) -> None:
                 "year": 2024,
                 "score": 0.8,
                 "pagerank": 0.2,
-                "reasons": ["Same community (1)", "Shares 3 references"],
+                "reasons": ["Same research cluster", "Shares 3 references"],
             },
             {
                 "bibcode": "B",

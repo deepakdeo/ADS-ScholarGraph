@@ -126,7 +126,7 @@ def test_subgraph_endpoint(monkeypatch) -> None:
                 "title": "Rec 1",
                 "year": 2023,
                 "score": 0.91,
-                "reasons": ["Same community (2)"],
+                "reasons": ["Same research cluster"],
             },
             {
                 "bibcode": "R2",

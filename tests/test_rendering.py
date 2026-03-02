@@ -45,7 +45,7 @@ def test_build_tooltip_includes_full_details() -> None:
         "pagerank": 0.321,
         "community_id": 7,
         "score": 0.81234,
-        "reasons": ["Same community", "High similarity"],
+        "reasons": ["Same research cluster", "High similarity"],
     }
 
     tooltip = build_tooltip(node, detail)
@@ -57,5 +57,5 @@ def test_build_tooltip_includes_full_details() -> None:
     assert "PageRank: 0.321000" in tooltip
     assert "Community: 7" in tooltip
     assert "Score: 0.8123" in tooltip
-    assert "Same community" in tooltip
+    assert "Same research cluster" in tooltip
     assert "&bull;" in tooltip

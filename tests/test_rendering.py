@@ -41,6 +41,9 @@ def test_build_tooltip_includes_full_details() -> None:
         "bibcode": "B1",
         "title": "Full Title",
         "year": 2025,
+        "citation_count": 12,
+        "pagerank": 0.321,
+        "community_id": 7,
         "score": 0.81234,
         "reasons": ["Same community", "High similarity"],
     }
@@ -50,6 +53,9 @@ def test_build_tooltip_includes_full_details() -> None:
     assert "Full Title" in tooltip
     assert "Bibcode: B1" in tooltip
     assert "Year: 2025" in tooltip
+    assert "Citations: 12" in tooltip
+    assert "PageRank: 0.321000" in tooltip
+    assert "Community: 7" in tooltip
     assert "Score: 0.8123" in tooltip
     assert "Same community" in tooltip
     assert "&bull;" in tooltip

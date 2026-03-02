@@ -15,6 +15,7 @@ class _FakeRepository:
                 "title": "Seed Paper",
                 "year": 2024,
                 "abstract": "Seed abstract",
+                "citation_count": 27,
                 "is_seed": True,
                 "pagerank": 0.42,
                 "community_id": 3,
@@ -46,6 +47,7 @@ def test_paper_and_search_endpoints() -> None:
         paper = client.get("/paper/B1")
         assert paper.status_code == 200
         assert paper.json()["title"] == "Seed Paper"
+        assert paper.json()["citation_count"] == 27
 
         search = client.get("/search", params={"q": "seed", "limit": 5})
         assert search.status_code == 200

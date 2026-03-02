@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any
 
+import networkx as nx
 import requests
 import streamlit as st
 from pyvis.network import Network
@@ -90,6 +91,162 @@ def _build_graph_details(
     return details
 
 
+def _enrich_paper_details(details_by_id: dict[str, dict[str, Any]], bibcodes: list[str]) -> None:
+    for bibcode in bibcodes:
+        detail = details_by_id.get(bibcode, {})
+        has_abstract = isinstance(detail.get("abstract"), str)
+        has_pagerank = isinstance(detail.get("pagerank"), (int, float))
+        if has_abstract and has_pagerank:
+            continue
+        try:
+            payload = _api_get(f"/paper/{bibcode}")
+        except requests.RequestException:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        merged = dict(detail)
+        merged.update(payload)
+        details_by_id[bibcode] = merged
+
+
+def _safe_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _safe_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _filter_subgraph(
+    subgraph: dict[str, Any],
+    *,
+    details_by_id: dict[str, dict[str, Any]],
+    show_papers: bool,
+    show_keywords: bool,
+    year_range: tuple[int, int],
+    min_citations: int,
+    min_pagerank: float,
+    communities: set[int],
+) -> dict[str, list[dict[str, Any]]]:
+    nodes_raw = subgraph.get("nodes")
+    edges_raw = subgraph.get("edges")
+    nodes = nodes_raw if isinstance(nodes_raw, list) else []
+    edges = edges_raw if isinstance(edges_raw, list) else []
+
+    keep_ids: set[str] = set()
+    kept_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+
+        node_type = node.get("type")
+        if node_type in {"seed", "recommended"}:
+            if not show_papers:
+                continue
+
+            detail = details_by_id.get(node_id, {})
+            year = _safe_int(detail.get("year")) or _safe_int(node.get("year"))
+            if year is not None and (year < year_range[0] or year > year_range[1]):
+                if node_type != "seed":
+                    continue
+
+            citations = _safe_int(detail.get("citation_count"))
+            if citations is not None and citations < min_citations and node_type != "seed":
+                continue
+
+            pagerank = _safe_float(detail.get("pagerank"))
+            if pagerank is not None and pagerank < min_pagerank and node_type != "seed":
+                continue
+
+            community_id = _safe_int(detail.get("community_id"))
+            if communities and community_id not in communities and node_type != "seed":
+                continue
+
+        elif node_type == "keyword":
+            if not show_keywords:
+                continue
+
+        keep_ids.add(node_id)
+        kept_nodes.append(node)
+
+    kept_edges: list[dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        if source in keep_ids and target in keep_ids:
+            kept_edges.append(edge)
+
+    return {"nodes": kept_nodes, "edges": kept_edges}
+
+
+def _matching_node_ids(
+    nodes: list[dict[str, Any]],
+    details_by_id: dict[str, dict[str, Any]],
+    search_term: str,
+) -> set[str]:
+    query = search_term.strip().lower()
+    if not query:
+        return set()
+
+    matches: set[str] = set()
+    for node in nodes:
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+
+        haystack: list[str] = []
+        for field in ("label", "title"):
+            value = node.get(field)
+            if isinstance(value, str):
+                haystack.append(value.lower())
+
+        detail = details_by_id.get(node_id, {})
+        for field in ("title", "abstract", "bibcode"):
+            value = detail.get(field)
+            if isinstance(value, str):
+                haystack.append(value.lower())
+
+        reasons = detail.get("reasons")
+        if isinstance(reasons, list):
+            haystack.extend(reason.lower() for reason in reasons if isinstance(reason, str))
+
+        if query in node_id.lower() or any(query in text for text in haystack):
+            matches.add(node_id)
+
+    return matches
+
+
+def _compute_shortest_path_edges(
+    subgraph: dict[str, list[dict[str, Any]]],
+    source_id: str,
+    target_id: str,
+) -> tuple[list[str], set[tuple[str, str]]]:
+    graph = nx.Graph()
+    for edge in subgraph.get("edges", []):
+        source = edge.get("source")
+        target = edge.get("target")
+        if isinstance(source, str) and isinstance(target, str):
+            graph.add_edge(source, target)
+
+    path_nodes = nx.shortest_path(graph, source=source_id, target=target_id)
+    highlighted_edges: set[tuple[str, str]] = set()
+    for index in range(len(path_nodes) - 1):
+        a = path_nodes[index]
+        b = path_nodes[index + 1]
+        highlighted_edges.add((a, b))
+        highlighted_edges.add((b, a))
+    return path_nodes, highlighted_edges
+
+
 def _render_subgraph(
     subgraph: dict[str, Any],
     *,
@@ -99,8 +256,12 @@ def _render_subgraph(
     enable_physics: bool,
     stabilization_iterations: int,
     show_edge_labels: bool,
+    highlighted_nodes: set[str] | None = None,
+    highlighted_edges: set[tuple[str, str]] | None = None,
 ) -> None:
     net = Network(height=f"{GRAPH_HEIGHT_PX}px", width="100%", directed=True, bgcolor="#ffffff")
+    highlighted_nodes = highlighted_nodes or set()
+    highlighted_edges = highlighted_edges or set()
 
     color_map = {
         "seed": "#f97316",
@@ -136,14 +297,21 @@ def _render_subgraph(
             max_label_len=max_label_len,
         )
         tooltip = build_tooltip(node, detail_by_id.get(node_id))
+        is_highlighted = node_id in highlighted_nodes
+        border_width = 4 if is_highlighted else 2
 
         net.add_node(
             node_id,
             label=label,
             title=tooltip,
-            color=color_map.get(node_type, "#64748b"),
+            color=("#facc15" if is_highlighted else color_map.get(node_type, "#64748b")),
             shape=shape_map.get(node_type, "dot"),
-            size=size_map.get(node_type, 22),
+            size=(
+                size_map.get(node_type, 22) * 1.5
+                if is_highlighted
+                else size_map.get(node_type, 22)
+            ),
+            borderWidth=border_width,
             font={"size": font_map.get(node_type, 14), "face": "Helvetica"},
         )
 
@@ -167,6 +335,11 @@ def _render_subgraph(
         elif edge_type == "RECOMMENDS":
             color = "#f59e0b"
             width = 2.2
+        dashes = edge_type == "HAS_KEYWORD"
+        if (source, target) in highlighted_edges:
+            color = "#ef4444"
+            width = 3.2
+            dashes = False
 
         net.add_edge(
             source,
@@ -175,6 +348,7 @@ def _render_subgraph(
             title=label,
             color=color,
             width=width,
+            dashes=dashes,
         )
 
     options = {
@@ -318,6 +492,111 @@ def main() -> None:
             }
         )
 
+    graph_nodes = graph_data.get("nodes")
+    if isinstance(graph_nodes, list):
+        nodes_list = [node for node in graph_nodes if isinstance(node, dict)]
+    else:
+        nodes_list = []
+    details_by_id = _build_graph_details(
+        seed_detail=seed_detail,
+        recs=recs if isinstance(recs, list) else [],
+        graph_nodes=nodes_list,
+    )
+
+    rec_bibcodes = [
+        rec.get("bibcode")
+        for rec in recs
+        if isinstance(rec, dict) and isinstance(rec.get("bibcode"), str)
+    ]
+    _enrich_paper_details(
+        details_by_id,
+        [selected_bibcode, *[bibcode for bibcode in rec_bibcodes if isinstance(bibcode, str)]],
+    )
+
+    paper_node_ids: list[str] = []
+    for node in nodes_list:
+        node_id = node.get("id")
+        node_type = node.get("type")
+        if isinstance(node_id, str) and node_type in {"seed", "recommended"}:
+            paper_node_ids.append(node_id)
+    years = [
+        year
+        for paper_id in paper_node_ids
+        for year in [_safe_int(details_by_id.get(paper_id, {}).get("year"))]
+        if year is not None
+    ]
+    citations = [
+        count
+        for paper_id in paper_node_ids
+        for count in [_safe_int(details_by_id.get(paper_id, {}).get("citation_count"))]
+        if count is not None
+    ]
+    pageranks = [
+        value
+        for paper_id in paper_node_ids
+        for value in [_safe_float(details_by_id.get(paper_id, {}).get("pagerank"))]
+        if value is not None
+    ]
+    available_communities = sorted(
+        {
+            community_id
+            for paper_id in paper_node_ids
+            for community_id in [_safe_int(details_by_id.get(paper_id, {}).get("community_id"))]
+            if community_id is not None
+        }
+    )
+
+    st.sidebar.markdown("### Graph Filters")
+    show_papers = st.sidebar.checkbox("Show papers", value=True)
+    show_keywords = st.sidebar.checkbox("Show keywords", value=include_keywords)
+    if years:
+        year_range = st.sidebar.slider(
+            "Publication year",
+            min_value=min(years),
+            max_value=max(years),
+            value=(min(years), max(years)),
+        )
+    else:
+        year_range = (1900, 2100)
+
+    max_citations = max(citations) if citations else 0
+    min_citations = st.sidebar.slider(
+        "Min citations",
+        min_value=0,
+        max_value=max(1, max_citations),
+        value=0,
+    )
+    if max_citations == 0:
+        min_citations = 0
+
+    max_pagerank = max(pageranks) if pageranks else 0.0
+    min_pagerank = st.sidebar.slider(
+        "Min PageRank",
+        min_value=0.0,
+        max_value=max(0.0001, max_pagerank),
+        value=0.0,
+        step=0.0001,
+    )
+    if max_pagerank == 0.0:
+        min_pagerank = 0.0
+
+    selected_communities = st.sidebar.multiselect(
+        "Communities",
+        options=available_communities,
+        default=[],
+    )
+
+    filtered_graph = _filter_subgraph(
+        graph_data,
+        details_by_id=details_by_id,
+        show_papers=show_papers,
+        show_keywords=show_keywords,
+        year_range=(int(year_range[0]), int(year_range[1])),
+        min_citations=min_citations,
+        min_pagerank=min_pagerank,
+        communities={int(value) for value in selected_communities},
+    )
+
     rec_tab, graph_tab = st.tabs(["Recommendations", "Graph View"])
 
     with rec_tab:
@@ -349,38 +628,87 @@ def main() -> None:
         st.subheader("Knowledge Graph View")
         st.markdown(
             """
-            **Legend**
-            - Orange star: Seed paper
-            - Blue circle: Recommended paper
-            - Gray box: Keyword node (optional)
-            - Orange edge: Recommendation rationale
-            - Gray edge: Citation link (`CITES`)
-            """
+            <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;
+                        border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;">
+              <span><b style="color:#f97316;">★</b> Seed paper</span>
+              <span><b style="color:#3b82f6;">●</b> Recommended paper</span>
+              <span><b style="color:#94a3b8;">■</b> Keyword node</span>
+              <span><b style="color:#f59e0b;">━</b> Recommendation edge</span>
+              <span><b style="color:#94a3b8;">━</b> CITES edge</span>
+              <span><b style="color:#9ca3af;">┈</b> HAS_KEYWORD edge</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
         st.caption("Tip: drag to pan, scroll to zoom. Reload the page to reset camera position.")
 
-        graph_nodes = graph_data.get("nodes")
-        nodes_list = graph_nodes if isinstance(graph_nodes, list) else []
-        details_by_id = _build_graph_details(
-            seed_detail=seed_detail,
-            recs=recs if isinstance(recs, list) else [],
-            graph_nodes=[node for node in nodes_list if isinstance(node, dict)],
-        )
+        filtered_nodes = filtered_graph.get("nodes", [])
+        filtered_node_dicts = [node for node in filtered_nodes if isinstance(node, dict)]
+        filtered_edges = filtered_graph.get("edges", [])
+
+        if not filtered_node_dicts:
+            st.warning("No nodes match the active filters. Relax filters to view the graph.")
+            return
+
+        search_term = st.text_input("Search nodes (title, bibcode, abstract, reasons)", value="")
+        highlighted_nodes = _matching_node_ids(filtered_node_dicts, details_by_id, search_term)
+        highlighted_edges: set[tuple[str, str]] = set()
+
+        paper_choices: dict[str, str] = {}
+        for node in filtered_node_dicts:
+            if node.get("type") not in {"seed", "recommended"}:
+                continue
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            label = _node_display_label(
+                node,
+                show_full_titles=True,
+                max_label_len=max_label_len,
+            )
+            paper_choices[f"{label} [{node_id}]"] = node_id
+
+        with st.expander("Find shortest path", expanded=False):
+            if len(paper_choices) < 2:
+                st.caption("Need at least two visible paper nodes for path exploration.")
+            else:
+                sorted_paper_labels = sorted(paper_choices.keys())
+                paper_a = st.selectbox("From paper", options=sorted_paper_labels, key="path_from")
+                paper_b = st.selectbox("To paper", options=sorted_paper_labels, key="path_to")
+                if st.button("Find Path", key="find_path_btn"):
+                    source_id = paper_choices[paper_a]
+                    target_id = paper_choices[paper_b]
+                    try:
+                        filtered_edge_dicts = [
+                            edge for edge in filtered_edges if isinstance(edge, dict)
+                        ]
+                        path_nodes, path_edges = _compute_shortest_path_edges(
+                            {"nodes": filtered_node_dicts, "edges": filtered_edge_dicts},
+                            source_id=source_id,
+                            target_id=target_id,
+                        )
+                        highlighted_nodes.update(path_nodes)
+                        highlighted_edges.update(path_edges)
+                        st.success("Path found: " + " -> ".join(path_nodes))
+                    except nx.NetworkXNoPath:
+                        st.warning("No path found between the selected papers in the current view.")
+                    except nx.NodeNotFound:
+                        st.warning("Selected nodes are not available in the current graph.")
 
         _render_subgraph(
-            graph_data,
+            filtered_graph,
             detail_by_id=details_by_id,
             show_full_titles=show_full_titles,
             max_label_len=max_label_len,
             enable_physics=enable_physics,
             stabilization_iterations=stabilization_iterations,
             show_edge_labels=show_edge_labels,
+            highlighted_nodes=highlighted_nodes,
+            highlighted_edges=highlighted_edges,
         )
 
         node_choices: dict[str, str] = {}
-        for node in nodes_list:
-            if not isinstance(node, dict):
-                continue
+        for node in filtered_node_dicts:
             node_id = node.get("id")
             if not isinstance(node_id, str):
                 continue
@@ -401,6 +729,18 @@ def main() -> None:
             st.markdown(f"**Bibcode/ID:** `{selected_node_id}`")
             st.markdown(f"**Title:** {selected_detail.get('title') or '(untitled)'}")
             st.markdown(f"**Year:** {selected_detail.get('year') or 'Unknown'}")
+            citation_count = selected_detail.get("citation_count")
+            citation_display = citation_count if citation_count is not None else "Unknown"
+            st.markdown(
+                f"**Citations:** "
+                f"{citation_display}"
+            )
+            pagerank_value = selected_detail.get("pagerank")
+            pagerank_display = pagerank_value if pagerank_value is not None else "Unknown"
+            st.markdown(
+                f"**PageRank:** "
+                f"{pagerank_display}"
+            )
 
             score = selected_detail.get("score")
             if isinstance(score, (int, float)):

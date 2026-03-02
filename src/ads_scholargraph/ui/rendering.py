@@ -65,6 +65,18 @@ def build_tooltip(node: dict[str, Any], detail: dict[str, Any] | None = None) ->
     lines.append(f"Type: {html.escape(node_type)}")
 
     if isinstance(detail, dict):
+        citation_count = detail.get("citation_count")
+        if isinstance(citation_count, int):
+            lines.append(f"Citations: {citation_count}")
+
+        pagerank = detail.get("pagerank")
+        if isinstance(pagerank, (int, float)):
+            lines.append(f"PageRank: {float(pagerank):.6f}")
+
+        community_id = detail.get("community_id")
+        if isinstance(community_id, int):
+            lines.append(f"Community: {community_id}")
+
         score = detail.get("score")
         if isinstance(score, (int, float)):
             lines.append(f"Score: {float(score):.4f}")

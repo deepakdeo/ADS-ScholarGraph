@@ -37,6 +37,7 @@ class PaperResponse(BaseModel):
     title: str | None
     year: int | None
     abstract: str | None
+    citation_count: int | None
     is_seed: bool
     pagerank: float | None
     community_id: int | None
@@ -101,6 +102,7 @@ class Neo4jRepository:
                p.title AS title,
                p.year AS year,
                p.abstract AS abstract,
+               p.citation_count AS citation_count,
                coalesce(p.is_seed, false) AS is_seed,
                p.pagerank AS pagerank,
                p.community_id AS community_id
@@ -275,6 +277,11 @@ def get_paper_endpoint(
         title=row.get("title") if isinstance(row.get("title"), str) else None,
         year=row.get("year") if isinstance(row.get("year"), int) else None,
         abstract=row.get("abstract") if isinstance(row.get("abstract"), str) else None,
+        citation_count=(
+            row.get("citation_count")
+            if isinstance(row.get("citation_count"), int)
+            else None
+        ),
         is_seed=bool(row.get("is_seed")),
         pagerank=pagerank,
         community_id=row.get("community_id") if isinstance(row.get("community_id"), int) else None,

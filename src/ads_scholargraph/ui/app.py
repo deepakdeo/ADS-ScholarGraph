@@ -30,9 +30,15 @@ STATE_SIGNATURE_KEY = "ads_scholargraph_signature"
 
 
 def _api_get(path: str, params: dict[str, Any] | None = None) -> Any:
-    response = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=30)
-    response.raise_for_status()
-    return response.json()
+    url = f"{API_BASE_URL}{path}"
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.ConnectionError as exc:
+        raise requests.RequestException(
+            f"Cannot reach API at {API_BASE_URL}. Is the backend running?"
+        ) from exc
 
 
 def _paper_label(paper: dict[str, Any]) -> str:
@@ -552,59 +558,60 @@ def main() -> None:
     st.sidebar.header("Recommendation Settings")
     mode = st.sidebar.selectbox("Mode", options=["hybrid", "graph", "embed"], index=0)
     k = st.sidebar.slider("Top-K", min_value=3, max_value=30, value=10, step=1)
-    max_graph_recs = st.sidebar.slider(
-        "Max nodes in graph (recommendations)",
-        min_value=3,
-        max_value=MAX_GRAPH_RECS,
-        value=10,
-        step=1,
-    )
-    show_full_titles = st.sidebar.checkbox("Show full titles on graph nodes", value=False)
-    max_label_len = st.sidebar.slider(
-        "Max label length",
-        min_value=30,
-        max_value=100,
-        value=60,
-        step=5,
-    )
-    enable_physics = st.sidebar.checkbox("Enable physics", value=True)
-    stabilization_iterations = st.sidebar.slider(
-        "Stabilize iterations",
-        min_value=50,
-        max_value=500,
-        value=180,
-        step=10,
-        disabled=not enable_physics,
-    )
-    show_edge_labels = st.sidebar.checkbox("Show edge labels", value=False)
-    st.sidebar.markdown("### Graph enrichments")
-    include_citations = st.sidebar.checkbox("Include citation edges", value=False)
-    include_keywords = st.sidebar.checkbox("Include keyword nodes", value=False)
-    include_similarity = st.sidebar.checkbox("Include similarity edges", value=False)
-    with st.sidebar.expander("Similarity Controls", expanded=False):
-        st.caption(
-            "SIMILAR_TO edges are generated offline from TF-IDF similarity over title+abstract."
+
+    with st.sidebar.expander("Graph Display", expanded=False):
+        max_graph_recs = st.slider(
+            "Max nodes in graph (recommendations)",
+            min_value=3,
+            max_value=MAX_GRAPH_RECS,
+            value=10,
+            step=1,
         )
-        st.markdown(
-            f"- Threshold preview: `>= {SIMILARITY_DEFAULT_THRESHOLD:.2f}`\n"
-            f"- Top-k preview: `{SIMILARITY_DEFAULT_TOP_K}` neighbors per paper"
+        show_full_titles = st.checkbox("Show full titles on graph nodes", value=False)
+        max_label_len = st.slider(
+            "Max label length",
+            min_value=30,
+            max_value=100,
+            value=60,
+            step=5,
         )
+        enable_physics = st.checkbox("Enable physics", value=True)
+        stabilization_iterations = st.slider(
+            "Stabilize iterations",
+            min_value=50,
+            max_value=500,
+            value=180,
+            step=10,
+            disabled=not enable_physics,
+        )
+        show_edge_labels = st.checkbox("Show edge labels", value=False)
+
+    with st.sidebar.expander("Graph Enrichments", expanded=False):
+        include_citations = st.checkbox("Include citation edges", value=False)
+        include_keywords = st.checkbox("Include keyword nodes", value=False)
+        include_similarity = st.checkbox("Include similarity edges", value=False)
         st.caption(
-            "Adjust these values when running "
-            "`python -m ads_scholargraph.graph_analytics.add_similarity_edges`."
+            "SIMILAR_TO edges are generated offline from TF-IDF similarity over title+abstract. "
+            f"Threshold: >= {SIMILARITY_DEFAULT_THRESHOLD:.2f}, "
+            f"top-k: {SIMILARITY_DEFAULT_TOP_K} neighbors per paper."
         )
 
-    query = st.text_input("Search seed papers (title/abstract keywords)", value="")
+    with st.form("search_form"):
+        query = st.text_input("Search seed papers (title/abstract keywords)", value="")
+        search_submitted = st.form_submit_button("Search", type="primary")
 
     matches: list[dict[str, Any]] = []
-    if query.strip():
+    if search_submitted and query.strip():
         try:
             matches = _api_get("/search", params={"q": query.strip(), "limit": 20})
         except requests.RequestException as exc:
             st.error(f"Search failed: {exc}")
+        st.session_state["ads_scholargraph_search_results"] = matches
+    elif "ads_scholargraph_search_results" in st.session_state:
+        matches = st.session_state["ads_scholargraph_search_results"]
 
     if not matches:
-        st.info("Enter keywords to search seed papers.")
+        st.info("Enter keywords and click Search to find seed papers.")
         return
 
     paper_by_label = {_paper_label(paper): paper for paper in matches}
@@ -630,43 +637,44 @@ def main() -> None:
     trigger = st.button("Recommend", type="primary")
 
     if trigger:
-        try:
-            seed_detail = _api_get(f"/paper/{selected_bibcode}")
-            recs = _api_get(
-                f"/recommend/paper/{selected_bibcode}",
-                params={"k": k, "mode": mode},
-            )
-            graph_data = _api_get(
-                f"/subgraph/paper/{selected_bibcode}",
-                params={
-                    "k": graph_k,
-                    "mode": mode,
-                    "include_citations": include_citations,
-                    "include_keywords": include_keywords,
-                    "include_similarity": include_similarity,
-                },
-            )
-        except requests.RequestException as exc:
-            st.error(f"Recommendation request failed: {exc}")
-        else:
-            stats_overview: dict[str, Any] = {}
-            stats_error: str | None = None
+        with st.spinner("Fetching recommendations..."):
             try:
-                stats_payload = _api_get("/stats/overview")
-                if isinstance(stats_payload, dict):
-                    stats_overview = stats_payload
+                seed_detail = _api_get(f"/paper/{selected_bibcode}")
+                recs = _api_get(
+                    f"/recommend/paper/{selected_bibcode}",
+                    params={"k": k, "mode": mode},
+                )
+                graph_data = _api_get(
+                    f"/subgraph/paper/{selected_bibcode}",
+                    params={
+                        "k": graph_k,
+                        "mode": mode,
+                        "include_citations": include_citations,
+                        "include_keywords": include_keywords,
+                        "include_similarity": include_similarity,
+                    },
+                )
             except requests.RequestException as exc:
-                stats_error = str(exc)
+                st.error(f"Recommendation request failed: {exc}")
+            else:
+                stats_overview: dict[str, Any] = {}
+                stats_error: str | None = None
+                try:
+                    stats_payload = _api_get("/stats/overview")
+                    if isinstance(stats_payload, dict):
+                        stats_overview = stats_payload
+                except requests.RequestException as exc:
+                    stats_error = str(exc)
 
-            st.session_state[STATE_PAYLOAD_KEY] = {
-                "selected_bibcode": selected_bibcode,
-                "seed_detail": seed_detail,
-                "recs": recs,
-                "graph_data": graph_data,
-                "stats_overview": stats_overview,
-                "stats_error": stats_error,
-            }
-            st.session_state[STATE_SIGNATURE_KEY] = request_signature
+                st.session_state[STATE_PAYLOAD_KEY] = {
+                    "selected_bibcode": selected_bibcode,
+                    "seed_detail": seed_detail,
+                    "recs": recs,
+                    "graph_data": graph_data,
+                    "stats_overview": stats_overview,
+                    "stats_error": stats_error,
+                }
+                st.session_state[STATE_SIGNATURE_KEY] = request_signature
 
     cached_payload_raw = st.session_state.get(STATE_PAYLOAD_KEY)
     if not isinstance(cached_payload_raw, dict):
@@ -801,7 +809,8 @@ def main() -> None:
         min_value=0.0,
         max_value=max(0.0001, max_pagerank),
         value=0.0,
-        step=0.0001,
+        step=0.001,
+        format="%.4f",
     )
     if max_pagerank == 0.0:
         min_pagerank = 0.0
@@ -810,6 +819,7 @@ def main() -> None:
         "Communities",
         options=available_communities,
         default=[],
+        help="Leave empty to show all communities.",
     )
 
     filtered_graph = _filter_subgraph(
@@ -845,12 +855,9 @@ def main() -> None:
                     for reason in reasons:
                         st.markdown(f"- {reason}")
 
-                try:
-                    paper = _api_get(f"/paper/{bibcode}")
-                    st.markdown("**Abstract:**")
-                    _render_abstract(paper.get("abstract"))
-                except requests.RequestException:
-                    st.markdown("Abstract unavailable.")
+                detail = details_by_id.get(bibcode, {})
+                st.markdown("**Abstract:**")
+                _render_abstract(detail.get("abstract"))
 
     with graph_tab:
         st.subheader("Knowledge Graph View")

@@ -23,6 +23,8 @@ from ads_scholargraph.utils.static_graph_renderer import (
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 MAX_GRAPH_RECS = 15
 GRAPH_HEIGHT_PX = 680
+SIMILARITY_DEFAULT_THRESHOLD = 0.30
+SIMILARITY_DEFAULT_TOP_K = 5
 
 
 def _api_get(path: str, params: dict[str, Any] | None = None) -> Any:
@@ -547,6 +549,18 @@ def main() -> None:
     include_citations = st.sidebar.checkbox("Include citation edges", value=False)
     include_keywords = st.sidebar.checkbox("Include keyword nodes", value=False)
     include_similarity = st.sidebar.checkbox("Include similarity edges", value=False)
+    with st.sidebar.expander("Similarity Controls", expanded=False):
+        st.caption(
+            "SIMILAR_TO edges are generated offline from TF-IDF similarity over title+abstract."
+        )
+        st.markdown(
+            f"- Threshold preview: `>= {SIMILARITY_DEFAULT_THRESHOLD:.2f}`\n"
+            f"- Top-k preview: `{SIMILARITY_DEFAULT_TOP_K}` neighbors per paper"
+        )
+        st.caption(
+            "Adjust these values when running "
+            "`python -m ads_scholargraph.graph_analytics.add_similarity_edges`."
+        )
 
     query = st.text_input("Search seed papers (title/abstract keywords)", value="")
 
@@ -781,10 +795,20 @@ def main() -> None:
         filtered_nodes = filtered_graph.get("nodes", [])
         filtered_node_dicts = [node for node in filtered_nodes if isinstance(node, dict)]
         filtered_edges = filtered_graph.get("edges", [])
+        similarity_edge_count = sum(
+            1
+            for edge in filtered_edges
+            if isinstance(edge, dict) and edge.get("type") == "SIMILAR_TO"
+        )
 
         if not filtered_node_dicts:
             st.warning("No nodes match the active filters. Relax filters to view the graph.")
             return
+        if include_similarity:
+            st.caption(
+                f"Similarity edges visible: {similarity_edge_count} "
+                f"(materialized with offline threshold/top-k settings)."
+            )
 
         search_term = st.text_input("Search nodes (title, bibcode, abstract, reasons)", value="")
         highlighted_nodes = _matching_node_ids(filtered_node_dicts, details_by_id, search_term)

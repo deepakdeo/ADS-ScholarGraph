@@ -20,6 +20,14 @@ Use it to pick a paper you are reading and instantly get a ranked “what to rea
 
 ![Knowledge Graph View](docs/assets/graph_view.png)
 
+## Visualization Features
+
+- Interactive graph view with filters (year, citations, PageRank, community) and node search highlight.
+- Shortest-path exploration between visible papers directly in the graph tab.
+- Rich node tooltips with title, year, citations, PageRank, community, score, and reasons.
+- Graph Stats tab with core KG metrics plus trends/distributions.
+- Schema View tab with an auto-generated entity/relationship overview diagram.
+
 ## Architecture
 
 ```mermaid

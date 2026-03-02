@@ -7,12 +7,14 @@ import os
 from typing import Any
 
 import networkx as nx
+import pandas as pd
 import requests
 import streamlit as st
 from pyvis.network import Network
 from streamlit.components.v1 import html as components_html
 
 from ads_scholargraph.ui.rendering import build_tooltip, sanitize_ads_html, shorten_title
+from ads_scholargraph.utils.schema_diagram import SchemaStats, render_schema_svg
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 MAX_GRAPH_RECS = 15
@@ -247,6 +249,77 @@ def _compute_shortest_path_edges(
     return path_nodes, highlighted_edges
 
 
+def _build_citation_histogram(citation_counts: list[int]) -> pd.DataFrame:
+    if not citation_counts:
+        return pd.DataFrame(columns=["bucket", "count"])
+
+    max_value = max(citation_counts)
+    if max_value <= 10:
+        bins = [0, 1, 2, 3, 4, 5, 10]
+    else:
+        step = max(10, int(max_value / 8))
+        bins = list(range(0, max_value + step, step))
+    if bins[-1] <= max_value:
+        bins.append(max_value + 1)
+
+    series = pd.Series(citation_counts, name="citation_count")
+    buckets = pd.cut(series, bins=bins, right=False, include_lowest=True)
+    counts = buckets.value_counts().sort_index()
+    frame = counts.rename("count").reset_index()
+    frame.columns = ["bucket", "count"]
+    frame["bucket"] = frame["bucket"].astype(str)
+    return frame
+
+
+def _render_graph_stats_tab(stats_overview: dict[str, Any]) -> None:
+    summary = stats_overview.get("summary")
+    if not isinstance(summary, dict):
+        st.warning("Stats payload is missing summary data.")
+        return
+
+    st.subheader("Knowledge Graph Statistics")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Papers", summary.get("paper_count", 0))
+    col2.metric("Authors", summary.get("author_count", 0))
+    col3.metric("Keywords", summary.get("keyword_count", 0))
+    col4.metric("Venues", summary.get("venue_count", 0))
+
+    col5, col6, col7, col8 = st.columns(4)
+    col5.metric("Citation Edges", summary.get("cites_count", 0))
+    col6.metric("Avg Degree", f"{float(summary.get('avg_degree', 0.0)):.2f}")
+    col7.metric("Communities", summary.get("community_count", 0))
+    col8.metric("Graph Density", f"{float(summary.get('graph_density', 0.0)):.6f}")
+
+    top_papers = stats_overview.get("top_papers")
+    if isinstance(top_papers, list) and top_papers:
+        top_df = pd.DataFrame(top_papers)
+        chart_df = top_df[["bibcode", "pagerank"]].set_index("bibcode")
+        st.markdown("**Top Papers by PageRank**")
+        st.bar_chart(chart_df, use_container_width=True)
+
+    communities = stats_overview.get("community_sizes")
+    if isinstance(communities, list) and communities:
+        community_df = pd.DataFrame(communities)
+        chart_df = community_df[["community_id", "size"]].set_index("community_id")
+        st.markdown("**Community Size Distribution**")
+        st.bar_chart(chart_df, use_container_width=True)
+
+    pubs_per_year = stats_overview.get("publications_per_year")
+    if isinstance(pubs_per_year, list) and pubs_per_year:
+        year_df = pd.DataFrame(pubs_per_year).sort_values("year")
+        chart_df = year_df[["year", "count"]].set_index("year")
+        st.markdown("**Publications Per Year**")
+        st.line_chart(chart_df, use_container_width=True)
+
+    citation_counts = stats_overview.get("citation_counts")
+    if isinstance(citation_counts, list):
+        numeric_citations = [value for value in citation_counts if isinstance(value, int)]
+        hist_df = _build_citation_histogram(numeric_citations)
+        if not hist_df.empty:
+            st.markdown("**Citation Count Distribution**")
+            st.bar_chart(hist_df.set_index("bucket"), use_container_width=True)
+
+
 def _render_subgraph(
     subgraph: dict[str, Any],
     *,
@@ -473,6 +546,15 @@ def main() -> None:
         st.error(f"Recommendation request failed: {exc}")
         return
 
+    stats_overview: dict[str, Any] = {}
+    stats_error: str | None = None
+    try:
+        stats_payload = _api_get("/stats/overview")
+        if isinstance(stats_payload, dict):
+            stats_overview = stats_payload
+    except requests.RequestException as exc:
+        stats_error = str(exc)
+
     with st.expander("Seed paper abstract", expanded=False):
         _render_abstract(seed_detail.get("abstract"))
 
@@ -597,7 +679,9 @@ def main() -> None:
         communities={int(value) for value in selected_communities},
     )
 
-    rec_tab, graph_tab = st.tabs(["Recommendations", "Graph View"])
+    rec_tab, graph_tab, stats_tab, schema_tab = st.tabs(
+        ["Recommendations", "Graph View", "Graph Stats", "Schema View"]
+    )
 
     with rec_tab:
         st.subheader("Recommendations")
@@ -764,6 +848,41 @@ def main() -> None:
                         paper_payload = selected_detail
                 st.markdown("**Abstract:**")
                 _render_abstract(paper_payload.get("abstract"))
+
+    with stats_tab:
+        if stats_error:
+            st.warning(f"Stats endpoint unavailable: {stats_error}")
+        elif not stats_overview:
+            st.warning("No graph stats available.")
+        else:
+            _render_graph_stats_tab(stats_overview)
+
+    with schema_tab:
+        st.subheader("Knowledge Graph Schema")
+        summary = stats_overview.get("summary") if isinstance(stats_overview, dict) else None
+        if isinstance(summary, dict):
+            schema_stats = SchemaStats(
+                paper_count=_safe_int(summary.get("paper_count")) or 0,
+                author_count=_safe_int(summary.get("author_count")) or 0,
+                keyword_count=_safe_int(summary.get("keyword_count")) or 0,
+                venue_count=_safe_int(summary.get("venue_count")) or 0,
+                cites_count=_safe_int(summary.get("cites_count")) or 0,
+            )
+        else:
+            schema_stats = SchemaStats(
+                paper_count=0,
+                author_count=0,
+                keyword_count=0,
+                venue_count=0,
+                cites_count=0,
+            )
+
+        schema_svg = render_schema_svg(schema_stats)
+        components_html(schema_svg, height=460, scrolling=False)
+        st.caption(
+            "Entity counts are from /stats/overview. "
+            "Relationships shown: CITES, WROTE, HAS_KEYWORD, PUBLISHED_IN."
+        )
 
 
 if __name__ == "__main__":

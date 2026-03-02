@@ -77,6 +77,43 @@ class SubgraphResponse(BaseModel):
     edges: list[SubgraphEdge]
 
 
+class GraphStatsSummary(BaseModel):
+    paper_count: int
+    author_count: int
+    keyword_count: int
+    venue_count: int
+    cites_count: int
+    avg_degree: float
+    community_count: int
+    graph_density: float
+
+
+class GraphStatsTopPaper(BaseModel):
+    bibcode: str
+    title: str | None
+    pagerank: float
+    citation_count: int | None
+    year: int | None
+
+
+class GraphStatsCommunity(BaseModel):
+    community_id: int
+    size: int
+
+
+class GraphStatsYearCount(BaseModel):
+    year: int
+    count: int
+
+
+class GraphStatsOverview(BaseModel):
+    summary: GraphStatsSummary
+    top_papers: list[GraphStatsTopPaper]
+    community_sizes: list[GraphStatsCommunity]
+    publications_per_year: list[GraphStatsYearCount]
+    citation_counts: list[int]
+
+
 class Neo4jRepository:
     """Read-only Neo4j access layer for API routes."""
 
@@ -182,6 +219,83 @@ class Neo4jRepository:
                 for record in session.run(query, bibcodes=bibcodes, limit=limit)
             ]
 
+    def get_graph_stats_summary(self) -> dict[str, Any]:
+        query = """
+        MATCH (p:Paper)
+        WITH count(p) AS paper_count
+        MATCH (a:Author)
+        WITH paper_count, count(a) AS author_count
+        MATCH (k:Keyword)
+        WITH paper_count, author_count, count(k) AS keyword_count
+        MATCH (v:Venue)
+        WITH paper_count, author_count, keyword_count, count(v) AS venue_count
+        MATCH ()-[c:CITES]->()
+        WITH paper_count, author_count, keyword_count, venue_count, count(c) AS cites_count
+        MATCH (p:Paper)
+        WHERE p.community_id IS NOT NULL
+        RETURN paper_count,
+               author_count,
+               keyword_count,
+               venue_count,
+               cites_count,
+               count(DISTINCT p.community_id) AS community_count
+        """
+        with self._driver.session() as session:
+            record = session.run(query).single()
+            return dict(record) if record else {}
+
+    def get_top_papers_by_pagerank(self, limit: int) -> list[dict[str, Any]]:
+        query = """
+        MATCH (p:Paper)
+        WHERE p.pagerank IS NOT NULL
+        RETURN p.bibcode AS bibcode,
+               p.title AS title,
+               p.pagerank AS pagerank,
+               p.citation_count AS citation_count,
+               p.year AS year
+        ORDER BY p.pagerank DESC
+        LIMIT $limit
+        """
+        with self._driver.session() as session:
+            return [dict(record) for record in session.run(query, limit=limit)]
+
+    def get_community_sizes(self, limit: int) -> list[dict[str, Any]]:
+        query = """
+        MATCH (p:Paper)
+        WHERE p.community_id IS NOT NULL
+        RETURN p.community_id AS community_id, count(*) AS size
+        ORDER BY size DESC
+        LIMIT $limit
+        """
+        with self._driver.session() as session:
+            return [dict(record) for record in session.run(query, limit=limit)]
+
+    def get_publications_per_year(self) -> list[dict[str, Any]]:
+        query = """
+        MATCH (p:Paper)
+        WHERE p.year IS NOT NULL
+        RETURN p.year AS year, count(*) AS count
+        ORDER BY year ASC
+        """
+        with self._driver.session() as session:
+            return [dict(record) for record in session.run(query)]
+
+    def get_citation_counts(self, limit: int) -> list[int]:
+        query = """
+        MATCH (p:Paper)
+        WHERE p.citation_count IS NOT NULL
+        RETURN p.citation_count AS citation_count
+        ORDER BY p.citation_count DESC
+        LIMIT $limit
+        """
+        with self._driver.session() as session:
+            values: list[int] = []
+            for record in session.run(query, limit=limit):
+                value = record.get("citation_count")
+                if isinstance(value, int):
+                    values.append(value)
+            return values
+
 
 def _normalize_recommendations(rows: list[dict[str, Any]]) -> list[RecommendationResponse]:
     normalized: list[RecommendationResponse] = []
@@ -211,6 +325,12 @@ def _normalize_recommendations(rows: list[dict[str, Any]]) -> list[Recommendatio
         )
 
     return normalized
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, int):
+        return value
+    return default
 
 
 def _recommend_rows(
@@ -322,6 +442,81 @@ def search_endpoint(
         )
 
     return results
+
+
+@app.get("/stats/overview", response_model=GraphStatsOverview)
+def stats_overview_endpoint(
+    repository: Neo4jRepository = Depends(get_repository),  # noqa: B008
+) -> GraphStatsOverview:
+    summary_raw = repository.get_graph_stats_summary()
+    paper_count = _as_int(summary_raw.get("paper_count"))
+    cites_count = _as_int(summary_raw.get("cites_count"))
+    avg_degree = (2.0 * float(cites_count) / float(paper_count)) if paper_count > 0 else 0.0
+    density = (
+        float(cites_count) / float(paper_count * (paper_count - 1))
+        if paper_count > 1
+        else 0.0
+    )
+
+    summary = GraphStatsSummary(
+        paper_count=paper_count,
+        author_count=_as_int(summary_raw.get("author_count")),
+        keyword_count=_as_int(summary_raw.get("keyword_count")),
+        venue_count=_as_int(summary_raw.get("venue_count")),
+        cites_count=cites_count,
+        avg_degree=avg_degree,
+        community_count=_as_int(summary_raw.get("community_count")),
+        graph_density=density,
+    )
+
+    top_papers: list[GraphStatsTopPaper] = []
+    for row in repository.get_top_papers_by_pagerank(limit=10):
+        bibcode = row.get("bibcode")
+        pagerank_raw = row.get("pagerank")
+        if not isinstance(bibcode, str) or not isinstance(pagerank_raw, (int, float)):
+            continue
+        top_papers.append(
+            GraphStatsTopPaper(
+                bibcode=bibcode,
+                title=row.get("title") if isinstance(row.get("title"), str) else None,
+                pagerank=float(pagerank_raw),
+                citation_count=(
+                    row.get("citation_count")
+                    if isinstance(row.get("citation_count"), int)
+                    else None
+                ),
+                year=row.get("year") if isinstance(row.get("year"), int) else None,
+            )
+        )
+
+    community_sizes: list[GraphStatsCommunity] = []
+    for row in repository.get_community_sizes(limit=20):
+        community_id = row.get("community_id")
+        size = row.get("size")
+        if isinstance(community_id, int) and isinstance(size, int):
+            community_sizes.append(
+                GraphStatsCommunity(
+                    community_id=community_id,
+                    size=size,
+                )
+            )
+
+    publications_per_year: list[GraphStatsYearCount] = []
+    for row in repository.get_publications_per_year():
+        year = row.get("year")
+        count = row.get("count")
+        if isinstance(year, int) and isinstance(count, int):
+            publications_per_year.append(GraphStatsYearCount(year=year, count=count))
+
+    citation_counts = repository.get_citation_counts(limit=5000)
+
+    return GraphStatsOverview(
+        summary=summary,
+        top_papers=top_papers,
+        community_sizes=community_sizes,
+        publications_per_year=publications_per_year,
+        citation_counts=citation_counts,
+    )
 
 
 @app.get("/subgraph/paper/{bibcode}", response_model=SubgraphResponse)

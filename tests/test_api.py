@@ -31,6 +31,36 @@ class _FakeRepository:
     def get_keyword_links(self, bibcodes: list[str], limit: int) -> list[dict[str, Any]]:
         return [{"bibcode": "R1", "keyword": "quenching"}]
 
+    def get_graph_stats_summary(self) -> dict[str, Any]:
+        return {
+            "paper_count": 3,
+            "author_count": 2,
+            "keyword_count": 4,
+            "venue_count": 1,
+            "cites_count": 2,
+            "community_count": 1,
+        }
+
+    def get_top_papers_by_pagerank(self, limit: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "bibcode": "B1",
+                "title": "Seed Paper",
+                "pagerank": 0.42,
+                "citation_count": 27,
+                "year": 2024,
+            }
+        ]
+
+    def get_community_sizes(self, limit: int) -> list[dict[str, Any]]:
+        return [{"community_id": 3, "size": 3}]
+
+    def get_publications_per_year(self) -> list[dict[str, Any]]:
+        return [{"year": 2024, "count": 2}, {"year": 2025, "count": 1}]
+
+    def get_citation_counts(self, limit: int) -> list[int]:
+        return [27, 14, 5]
+
 
 def test_health_endpoint() -> None:
     client = TestClient(app)
@@ -128,5 +158,22 @@ def test_subgraph_endpoint(monkeypatch) -> None:
         assert "RECOMMENDS" in edge_types
         assert "CITES" in edge_types
         assert "HAS_KEYWORD" in edge_types
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_stats_overview_endpoint() -> None:
+    app.dependency_overrides[get_repository] = lambda: _FakeRepository()
+    client = TestClient(app)
+    try:
+        resp = client.get("/stats/overview")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["summary"]["paper_count"] == 3
+        assert payload["summary"]["cites_count"] == 2
+        assert payload["top_papers"][0]["bibcode"] == "B1"
+        assert payload["community_sizes"][0]["community_id"] == 3
+        assert payload["publications_per_year"][0]["year"] == 2024
+        assert payload["citation_counts"] == [27, 14, 5]
     finally:
         app.dependency_overrides.clear()

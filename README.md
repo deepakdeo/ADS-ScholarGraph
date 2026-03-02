@@ -27,6 +27,7 @@ Use it to pick a paper you are reading and instantly get a ranked “what to rea
 - Rich node tooltips with title, year, citations, PageRank, community, score, and reasons.
 - Graph Stats tab with core KG metrics plus trends/distributions.
 - Schema View tab with an auto-generated entity/relationship overview diagram.
+- One-click graph exports from the UI: interactive HTML, GEXF (Gephi-ready), and static SVG snapshot.
 
 ## Architecture
 

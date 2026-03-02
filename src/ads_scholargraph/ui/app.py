@@ -15,6 +15,10 @@ from streamlit.components.v1 import html as components_html
 
 from ads_scholargraph.ui.rendering import build_tooltip, sanitize_ads_html, shorten_title
 from ads_scholargraph.utils.schema_diagram import SchemaStats, render_schema_svg
+from ads_scholargraph.utils.static_graph_renderer import (
+    graph_to_gexf_bytes,
+    render_static_graph_svg,
+)
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 MAX_GRAPH_RECS = 15
@@ -249,6 +253,45 @@ def _compute_shortest_path_edges(
     return path_nodes, highlighted_edges
 
 
+def _build_networkx_from_subgraph(
+    subgraph: dict[str, list[dict[str, Any]]],
+    *,
+    details_by_id: dict[str, dict[str, Any]],
+    highlighted_nodes: set[str],
+    highlighted_edges: set[tuple[str, str]],
+) -> nx.DiGraph:
+    graph = nx.DiGraph()
+
+    for node in subgraph.get("nodes", []):
+        node_id = node.get("id")
+        if not isinstance(node_id, str):
+            continue
+        detail = details_by_id.get(node_id, {})
+        graph.add_node(
+            node_id,
+            label=_node_display_label(node, show_full_titles=False, max_label_len=40),
+            type=node.get("type"),
+            highlighted=node_id in highlighted_nodes,
+            title=detail.get("title"),
+            year=detail.get("year"),
+        )
+
+    for edge in subgraph.get("edges", []):
+        source = edge.get("source")
+        target = edge.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        graph.add_edge(
+            source,
+            target,
+            type=edge.get("type"),
+            label=edge.get("label"),
+            highlighted=(source, target) in highlighted_edges,
+        )
+
+    return graph
+
+
 def _build_citation_histogram(citation_counts: list[int]) -> pd.DataFrame:
     if not citation_counts:
         return pd.DataFrame(columns=["bucket", "count"])
@@ -331,7 +374,7 @@ def _render_subgraph(
     show_edge_labels: bool,
     highlighted_nodes: set[str] | None = None,
     highlighted_edges: set[tuple[str, str]] | None = None,
-) -> None:
+) -> Network:
     net = Network(height=f"{GRAPH_HEIGHT_PX}px", width="100%", directed=True, bgcolor="#ffffff")
     highlighted_nodes = highlighted_nodes or set()
     highlighted_edges = highlighted_edges or set()
@@ -458,6 +501,7 @@ def _render_subgraph(
     }
     net.set_options(json.dumps(options))
     components_html(net.generate_html(), height=GRAPH_HEIGHT_PX + 40, scrolling=True)
+    return net
 
 
 def main() -> None:
@@ -779,7 +823,7 @@ def main() -> None:
                     except nx.NodeNotFound:
                         st.warning("Selected nodes are not available in the current graph.")
 
-        _render_subgraph(
+        rendered_network = _render_subgraph(
             filtered_graph,
             detail_by_id=details_by_id,
             show_full_titles=show_full_titles,
@@ -790,6 +834,44 @@ def main() -> None:
             highlighted_nodes=highlighted_nodes,
             highlighted_edges=highlighted_edges,
         )
+
+        export_graph = _build_networkx_from_subgraph(
+            {
+                "nodes": filtered_node_dicts,
+                "edges": [edge for edge in filtered_edges if isinstance(edge, dict)],
+            },
+            details_by_id=details_by_id,
+            highlighted_nodes=highlighted_nodes,
+            highlighted_edges=highlighted_edges,
+        )
+
+        with st.expander("Export current graph", expanded=False):
+            html_payload = rendered_network.generate_html()
+            st.download_button(
+                "Download HTML",
+                data=html_payload,
+                file_name="ads_scholargraph_graph.html",
+                mime="text/html",
+                key="download_html_graph",
+            )
+            st.download_button(
+                "Download GEXF",
+                data=graph_to_gexf_bytes(export_graph),
+                file_name="ads_scholargraph_graph.gexf",
+                mime="application/xml",
+                key="download_gexf_graph",
+            )
+            svg_payload = render_static_graph_svg(
+                export_graph,
+                title=f"ADS ScholarGraph View ({selected_bibcode})",
+            )
+            st.download_button(
+                "Download SVG snapshot",
+                data=svg_payload,
+                file_name="ads_scholargraph_graph.svg",
+                mime="image/svg+xml",
+                key="download_svg_graph",
+            )
 
         node_choices: dict[str, str] = {}
         for node in filtered_node_dicts:

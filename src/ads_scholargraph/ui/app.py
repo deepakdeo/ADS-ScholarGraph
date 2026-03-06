@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import json
+import math
 import os
 from typing import Any
 
@@ -25,6 +27,10 @@ MAX_GRAPH_RECS = 15
 GRAPH_HEIGHT_PX = 680
 SIMILARITY_DEFAULT_THRESHOLD = 0.30
 SIMILARITY_DEFAULT_TOP_K = 5
+GRAPH_BACKGROUND = "#f8f4ea"
+SEED_COLOR = "#d97706"
+RECOMMENDED_COLOR = "#2563eb"
+KEYWORD_COLOR = "#94a3b8"
 STATE_PAYLOAD_KEY = "ads_scholargraph_payload"
 STATE_SIGNATURE_KEY = "ads_scholargraph_signature"
 
@@ -133,6 +139,204 @@ def _safe_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _inject_app_css() -> None:
+    st.markdown(
+        """
+        <style>
+          .sg-badge-row,
+          .sg-legend-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+          }
+
+          .sg-badge,
+          .sg-legend-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.38rem 0.72rem;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            background: rgba(245, 245, 245, 0.88);
+            color: #172033;
+          }
+
+          .sg-card {
+            padding: 1.15rem 1.15rem 1rem 1.15rem;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            background: rgba(245, 245, 245, 0.92);
+          }
+
+          .sg-card-cool {
+            background: rgba(239, 246, 255, 0.92);
+          }
+
+          .sg-card-label {
+            margin: 0 0 0.35rem 0;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #5b677b;
+          }
+
+          .sg-card-title {
+            margin: 0;
+            font-size: 1.2rem;
+            color: #172033;
+          }
+
+          .sg-card-meta {
+            color: #5b677b;
+            margin: 0.15rem 0 0.35rem 0;
+          }
+
+          .sg-swatch {
+            width: 0.9rem;
+            height: 0.9rem;
+            border-radius: 999px;
+            display: inline-block;
+            box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+          }
+
+          .sg-swatch-square {
+            border-radius: 4px;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _reason_chip_row(reasons: list[str]) -> str:
+    chips = [
+        f"<span class='sg-badge'>{html.escape(reason)}</span>"
+        for reason in reasons[:3]
+        if reason
+    ]
+    return "".join(chips)
+
+
+def _render_recommendation_spotlight(recs: list[dict[str, Any]]) -> None:
+    spotlight = [rec for rec in recs if isinstance(rec, dict)][:3]
+    if not spotlight:
+        return
+
+    st.markdown("#### Top Picks")
+    columns = st.columns(len(spotlight))
+    for column, rec in zip(columns, spotlight, strict=True):
+        raw_title = rec.get("title")
+        title = raw_title if isinstance(raw_title, str) else "(untitled)"
+        year = rec.get("year") if isinstance(rec.get("year"), int) else "Unknown year"
+        score = rec.get("score")
+        score_display = f"{float(score):.3f}" if isinstance(score, (int, float)) else "n/a"
+        reasons_raw = rec.get("reasons")
+        if isinstance(reasons_raw, list):
+            reasons = [reason for reason in reasons_raw if isinstance(reason, str)]
+        else:
+            reasons = []
+
+        with column:
+            st.markdown(
+                f"""
+                <section class="sg-card sg-card-cool">
+                  <p class="sg-card-label">Recommendation</p>
+                  <h3 class="sg-card-title">{html.escape(shorten_title(title, 92))}</h3>
+                  <p class="sg-card-meta">
+                    {html.escape(str(year))} • Score {html.escape(score_display)}
+                  </p>
+                  <div class="sg-badge-row">{_reason_chip_row(reasons)}</div>
+                </section>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def _render_graph_legend() -> None:
+    legend_items = [
+        (
+            f"<span class='sg-swatch' style='background:{SEED_COLOR};'></span>",
+            "Seed",
+        ),
+        (
+            f"<span class='sg-swatch' style='background:{RECOMMENDED_COLOR};'></span>",
+            "Recommended",
+        ),
+        (
+            (
+                f"<span class='sg-swatch sg-swatch-square' "
+                f"style='background:{KEYWORD_COLOR};'></span>"
+            ),
+            "Keyword",
+        ),
+        ("<span class='sg-swatch' style='background:#c2410c;'></span>", "Recommendation edge"),
+        ("<span class='sg-swatch' style='background:#94a3b8;'></span>", "Citation context"),
+        ("<span class='sg-swatch' style='background:#7c3aed;'></span>", "Similarity link"),
+    ]
+    markup = "".join(
+        f"<span class='sg-legend-chip'>{swatch}{html.escape(label)}</span>"
+        for swatch, label in legend_items
+    )
+    st.markdown(
+        f"""
+        <div class="sg-legend-row">
+          {markup}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _initial_graph_positions(nodes: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
+    seed_ids: list[str] = []
+    recommended_ids: list[str] = []
+    keyword_ids: list[str] = []
+
+    for node in nodes:
+        node_id = node.get("id")
+        node_type = node.get("type")
+        if not isinstance(node_id, str) or not isinstance(node_type, str):
+            continue
+        if node_type == "seed":
+            seed_ids.append(node_id)
+        elif node_type == "recommended":
+            recommended_ids.append(node_id)
+        elif node_type == "keyword":
+            keyword_ids.append(node_id)
+
+    positions: dict[str, tuple[float, float]] = {}
+    if seed_ids:
+        positions[seed_ids[0]] = (0.0, 0.0)
+
+    rec_count = len(recommended_ids)
+    if rec_count == 1:
+        positions[recommended_ids[0]] = (280.0, -40.0)
+    elif rec_count > 1:
+        for idx, node_id in enumerate(recommended_ids):
+            angle = ((2.0 * math.pi) * idx / rec_count) - (math.pi / 2.0)
+            radius = 300.0 if idx % 2 == 0 else 250.0
+            positions[node_id] = (
+                math.cos(angle) * radius,
+                math.sin(angle) * radius,
+            )
+
+    keyword_count = len(keyword_ids)
+    if keyword_count == 1:
+        positions[keyword_ids[0]] = (0.0, -430.0)
+    elif keyword_count > 1:
+        for idx, node_id in enumerate(keyword_ids):
+            angle = ((2.0 * math.pi) * idx / keyword_count) - (math.pi / 2.0)
+            positions[node_id] = (
+                math.cos(angle) * 450.0,
+                math.sin(angle) * 450.0,
+            )
+
+    return positions
 
 
 def _build_request_signature(
@@ -378,21 +582,21 @@ def _render_graph_stats_tab(stats_overview: dict[str, Any]) -> None:
         top_df = pd.DataFrame(top_papers)
         chart_df = top_df[["bibcode", "pagerank"]].set_index("bibcode")
         st.markdown("**Top Papers by PageRank**")
-        st.bar_chart(chart_df, use_container_width=True)
+        st.bar_chart(chart_df, width="stretch")
 
     communities = stats_overview.get("community_sizes")
     if isinstance(communities, list) and communities:
         community_df = pd.DataFrame(communities)
         chart_df = community_df[["community_id", "size"]].set_index("community_id")
         st.markdown("**Community Size Distribution**")
-        st.bar_chart(chart_df, use_container_width=True)
+        st.bar_chart(chart_df, width="stretch")
 
     pubs_per_year = stats_overview.get("publications_per_year")
     if isinstance(pubs_per_year, list) and pubs_per_year:
         year_df = pd.DataFrame(pubs_per_year).sort_values("year")
         chart_df = year_df[["year", "count"]].set_index("year")
         st.markdown("**Publications Per Year**")
-        st.line_chart(chart_df, use_container_width=True)
+        st.line_chart(chart_df, width="stretch")
 
     citation_counts = stats_overview.get("citation_counts")
     if isinstance(citation_counts, list):
@@ -400,7 +604,7 @@ def _render_graph_stats_tab(stats_overview: dict[str, Any]) -> None:
         hist_df = _build_citation_histogram(numeric_citations)
         if not hist_df.empty:
             st.markdown("**Citation Count Distribution**")
-            st.bar_chart(hist_df.set_index("bucket"), use_container_width=True)
+            st.bar_chart(hist_df.set_index("bucket"), width="stretch")
 
 
 def _render_subgraph(
@@ -415,14 +619,20 @@ def _render_subgraph(
     highlighted_nodes: set[str] | None = None,
     highlighted_edges: set[tuple[str, str]] | None = None,
 ) -> Network:
-    net = Network(height=f"{GRAPH_HEIGHT_PX}px", width="100%", directed=True, bgcolor="#ffffff")
+    net = Network(
+        height=f"{GRAPH_HEIGHT_PX}px",
+        width="100%",
+        directed=True,
+        bgcolor=GRAPH_BACKGROUND,
+        font_color="#1f2937",
+    )
     highlighted_nodes = highlighted_nodes or set()
     highlighted_edges = highlighted_edges or set()
 
     color_map = {
-        "seed": "#f97316",
-        "recommended": "#3b82f6",
-        "keyword": "#94a3b8",
+        "seed": {"background": SEED_COLOR, "border": "#9a3412"},
+        "recommended": {"background": RECOMMENDED_COLOR, "border": "#1d4ed8"},
+        "keyword": {"background": KEYWORD_COLOR, "border": "#94a3b8"},
     }
     shape_map = {
         "seed": "star",
@@ -439,36 +649,79 @@ def _render_subgraph(
         "recommended": 14,
         "keyword": 12,
     }
-
     nodes = subgraph.get("nodes", [])
+    initial_positions = _initial_graph_positions(
+        [node for node in nodes if isinstance(node, dict)]
+    )
     for node in nodes:
         node_id = node.get("id")
         if not isinstance(node_id, str):
             continue
 
         node_type = node.get("type") if isinstance(node.get("type"), str) else "recommended"
+        detail = detail_by_id.get(node_id, {})
         label = _node_display_label(
             node,
             show_full_titles=show_full_titles,
             max_label_len=max_label_len,
         )
-        tooltip = build_tooltip(node, detail_by_id.get(node_id))
+        if node_type == "keyword" and not show_full_titles:
+            label = shorten_title(label, min(max_label_len, 22))
+        elif (
+            node_type == "recommended"
+            and not show_full_titles
+            and node_id not in highlighted_nodes
+        ):
+            label = shorten_title(label, min(max_label_len, 34))
+
+        tooltip = build_tooltip(node, detail)
         is_highlighted = node_id in highlighted_nodes
-        border_width = 4 if is_highlighted else 2
+        score = _safe_float(detail.get("score")) or 0.0
+        pagerank = _safe_float(detail.get("pagerank")) or 0.0
+        citation_count = _safe_int(detail.get("citation_count")) or 0
+        signal_boost = min(
+            12.0,
+            (score * 18.0) + (pagerank * 80.0) + min(citation_count / 40.0, 3.0),
+        )
+        size = float(size_map.get(node_type, 22))
+        if node_type != "keyword":
+            size += signal_boost
+        if is_highlighted:
+            size *= 1.25
+
+        border_width = 4 if is_highlighted else 1.8
+        node_color = color_map.get(node_type, {"background": "#64748b", "border": "#475569"})
+        if is_highlighted:
+            node_color = {"background": "#facc15", "border": "#b45309"}
+
+        position = initial_positions.get(node_id, (0.0, 0.0))
 
         net.add_node(
             node_id,
             label=label,
             title=tooltip,
-            color=("#facc15" if is_highlighted else color_map.get(node_type, "#64748b")),
+            color=node_color,
             shape=shape_map.get(node_type, "dot"),
-            size=(
-                size_map.get(node_type, 22) * 1.5
-                if is_highlighted
-                else size_map.get(node_type, 22)
-            ),
+            size=size,
             borderWidth=border_width,
-            font={"size": font_map.get(node_type, 14), "face": "Helvetica"},
+            shadow={
+                "enabled": True,
+                "size": 12,
+                "x": 0,
+                "y": 6,
+                "color": "rgba(15, 23, 42, 0.12)",
+            },
+            font={
+                "size": font_map.get(node_type, 14),
+                "face": "Trebuchet MS",
+                "color": "#1f2937",
+                "strokeWidth": 4,
+                "strokeColor": "rgba(248, 244, 234, 0.9)",
+            },
+            x=position[0],
+            y=position[1],
+            fixed={"x": not enable_physics, "y": not enable_physics},
+            physics=(enable_physics and node_type != "seed"),
         )
 
     edges = subgraph.get("edges", [])
@@ -480,57 +733,83 @@ def _render_subgraph(
 
         edge_type = edge.get("type") if isinstance(edge.get("type"), str) else "RECOMMENDS"
         label = edge.get("label") if isinstance(edge.get("label"), str) else edge_type
-        color = "#64748b"
-        width = 2.0
+        color = "rgba(71, 85, 105, 0.35)"
+        width = 1.8
+        smooth_type = "continuous"
+        edge_label = ""
         if edge_type == "CITES":
-            color = "#94a3b8"
-            width = 1.0
+            color = "rgba(148, 163, 184, 0.48)"
+            width = 0.9
         elif edge_type == "HAS_KEYWORD":
-            color = "#9ca3af"
-            width = 1.2
+            color = "rgba(148, 163, 184, 0.36)"
+            width = 1.1
         elif edge_type == "RECOMMENDS":
-            color = "#f59e0b"
-            width = 2.2
+            color = "rgba(194, 65, 12, 0.86)"
+            width = 2.8
+            smooth_type = "curvedCW"
+            if show_edge_labels:
+                edge_label = shorten_title(label, 30)
         elif edge_type == "SIMILAR_TO":
             similarity = edge.get("similarity")
             similarity_score = float(similarity) if isinstance(similarity, (int, float)) else 0.0
-            color = "#ec4899"
-            width = 1.2 + (2.5 * min(max(similarity_score, 0.0), 1.0))
+            color = "rgba(124, 58, 237, 0.62)"
+            width = 1.2 + (2.3 * min(max(similarity_score, 0.0), 1.0))
+            smooth_type = "curvedCCW"
+            if show_edge_labels:
+                edge_label = label
         dashes = edge_type == "HAS_KEYWORD"
         if (source, target) in highlighted_edges:
-            color = "#ef4444"
+            color = "rgba(220, 38, 38, 0.92)"
             width = 3.2
             dashes = False
+            edge_label = shorten_title(label, 34) if show_edge_labels else ""
 
         net.add_edge(
             source,
             target,
-            label=label if show_edge_labels else "",
+            label=edge_label,
             title=label,
             color=color,
             width=width,
             dashes=dashes,
+            smooth={"enabled": True, "type": smooth_type, "roundness": 0.16},
+            font={
+                "size": 10,
+                "face": "Trebuchet MS",
+                "align": "top",
+                "background": "rgba(255, 252, 247, 0.92)",
+                "strokeWidth": 0,
+            },
         )
 
     options = {
-        "layout": {"improvedLayout": True},
+        "layout": {
+            "randomSeed": 17,
+            "improvedLayout": enable_physics,
+        },
         "interaction": {
             "hover": True,
             "navigationButtons": True,
             "keyboard": True,
-            "tooltipDelay": 80,
+            "multiselect": True,
+            "tooltipDelay": 100,
             "zoomView": True,
             "dragView": True,
         },
+        "nodes": {
+            "borderWidthSelected": 4,
+            "shapeProperties": {"useBorderWithImage": False},
+        },
         "physics": {
             "enabled": enable_physics,
-            "barnesHut": {
-                "gravitationalConstant": -12000,
-                "centralGravity": 0.2,
-                "springLength": 220,
-                "springConstant": 0.02,
-                "damping": 0.82,
-                "avoidOverlap": 0.35,
+            "solver": "forceAtlas2Based",
+            "forceAtlas2Based": {
+                "gravitationalConstant": -58,
+                "centralGravity": 0.018,
+                "springLength": 145,
+                "springConstant": 0.08,
+                "damping": 0.56,
+                "avoidOverlap": 0.72,
             },
             "stabilization": {
                 "enabled": enable_physics,
@@ -539,18 +818,101 @@ def _render_subgraph(
             },
         },
         "edges": {
-            "arrows": {"to": {"enabled": True, "scaleFactor": 0.7}},
-            "font": {"size": 11, "align": "middle", "face": "Helvetica"},
+            "color": {"inherit": False},
+            "arrows": {"to": {"enabled": True, "scaleFactor": 0.58}},
+            "selectionWidth": 1.3,
             "smooth": {"enabled": True, "type": "dynamic"},
         },
     }
     net.set_options(json.dumps(options))
-    components_html(net.generate_html(), height=GRAPH_HEIGHT_PX + 40, scrolling=True)
+    html_payload = net.generate_html()
+    fit_script = """
+    <script type="text/javascript">
+    (function() {
+      function centerGraph() {
+        if (typeof network === "undefined") {
+          return;
+        }
+        const apply = function() {
+          try {
+            network.redraw();
+            network.fit({animation: false});
+            network.moveTo({scale: 0.82});
+          } catch (err) {
+            console.warn(err);
+          }
+        };
+        apply();
+        if (typeof network.once === "function") {
+          network.once("stabilizationIterationsDone", apply);
+        }
+        setTimeout(apply, 150);
+        setTimeout(apply, 600);
+        setTimeout(apply, 1200);
+      }
+
+      function whenVisible(callback) {
+        const container = document.getElementById("mynetwork");
+        if (!container) {
+          return;
+        }
+
+        let rafId = null;
+        const schedule = function() {
+          if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+          }
+          rafId = requestAnimationFrame(function() {
+            rafId = null;
+            if (container.clientWidth > 0 && container.clientHeight > 0) {
+              callback();
+            }
+          });
+        };
+
+        schedule();
+
+        if (typeof ResizeObserver !== "undefined") {
+          const resizeObserver = new ResizeObserver(schedule);
+          resizeObserver.observe(container);
+        } else {
+          window.addEventListener("resize", schedule);
+        }
+
+        if (typeof MutationObserver !== "undefined") {
+          const mutationObserver = new MutationObserver(schedule);
+          let current = container;
+          while (current) {
+            mutationObserver.observe(current, {
+              attributes: true,
+              attributeFilter: ["style", "class"],
+            });
+            current = current.parentElement;
+          }
+        }
+
+        document.addEventListener("visibilitychange", schedule);
+      }
+
+      if (document.readyState === "complete") {
+        whenVisible(centerGraph);
+      } else {
+        window.addEventListener("load", function() {
+          whenVisible(centerGraph);
+        });
+      }
+    })();
+    </script>
+    """
+    html_payload = html_payload.replace("</body>", fit_script + "</body>")
+    components_html(html_payload, height=GRAPH_HEIGHT_PX + 40, scrolling=True)
     return net
 
 
 def main() -> None:
     st.set_page_config(page_title="ADS ScholarGraph Recommender", layout="wide")
+
+    _inject_app_css()
 
     st.title("ADS ScholarGraph Recommender")
     st.caption("Search seed papers and generate explainable recommendations from the local KG.")
@@ -707,12 +1069,6 @@ def main() -> None:
     stats_overview = stats_overview_raw if isinstance(stats_overview_raw, dict) else {}
     stats_error = stats_error_raw if isinstance(stats_error_raw, str) else None
 
-    with st.expander("Seed paper abstract", expanded=False):
-        _render_abstract(seed_detail.get("abstract"))
-
-    if not recs:
-        st.warning("No recommendations returned for this seed paper.")
-
     table_rows: list[dict[str, Any]] = []
     for rec in recs:
         table_rows.append(
@@ -779,6 +1135,12 @@ def main() -> None:
         }
     )
 
+    with st.expander("Seed paper abstract", expanded=False):
+        _render_abstract(seed_detail.get("abstract"))
+
+    if not recs:
+        st.warning("No recommendations returned for this seed paper.")
+
     st.sidebar.markdown("### Graph Filters")
     show_papers = st.sidebar.checkbox("Show papers", value=True)
     show_keywords = st.sidebar.checkbox("Show keywords", value=include_keywords)
@@ -838,6 +1200,7 @@ def main() -> None:
 
     with rec_tab:
         st.subheader("Recommendations")
+        _render_recommendation_spotlight(recs if isinstance(recs, list) else [])
         st.dataframe(table_rows, use_container_width=True)
 
         st.subheader("Recommendation Details")
@@ -860,21 +1223,7 @@ def main() -> None:
 
     with graph_tab:
         st.subheader("Knowledge Graph View")
-        st.markdown(
-            """
-            <div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;
-                        border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;">
-              <span><b style="color:#f97316;">★</b> Seed paper</span>
-              <span><b style="color:#3b82f6;">●</b> Recommended paper</span>
-              <span><b style="color:#94a3b8;">■</b> Keyword node</span>
-              <span><b style="color:#f59e0b;">━</b> Recommendation edge</span>
-              <span><b style="color:#94a3b8;">━</b> CITES edge</span>
-              <span><b style="color:#9ca3af;">┈</b> HAS_KEYWORD edge</span>
-              <span><b style="color:#ec4899;">━</b> SIMILAR_TO edge</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        _render_graph_legend()
         st.caption("Tip: drag to pan, scroll to zoom. Reload the page to reset camera position.")
 
         filtered_nodes = filtered_graph.get("nodes", [])
@@ -1013,16 +1362,10 @@ def main() -> None:
             st.markdown(f"**Year:** {selected_detail.get('year') or 'Unknown'}")
             citation_count = selected_detail.get("citation_count")
             citation_display = citation_count if citation_count is not None else "Unknown"
-            st.markdown(
-                f"**Citations:** "
-                f"{citation_display}"
-            )
+            st.markdown(f"**Citations:** {citation_display}")
             pagerank_value = selected_detail.get("pagerank")
             pagerank_display = pagerank_value if pagerank_value is not None else "Unknown"
-            st.markdown(
-                f"**PageRank:** "
-                f"{pagerank_display}"
-            )
+            st.markdown(f"**PageRank:** {pagerank_display}")
 
             score = selected_detail.get("score")
             if isinstance(score, (int, float)):

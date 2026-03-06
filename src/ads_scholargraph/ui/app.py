@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import html
 import json
-import math
 import os
 from typing import Any
 
@@ -27,9 +26,8 @@ MAX_GRAPH_RECS = 15
 GRAPH_HEIGHT_PX = 680
 SIMILARITY_DEFAULT_THRESHOLD = 0.30
 SIMILARITY_DEFAULT_TOP_K = 5
-GRAPH_BACKGROUND = "#f8f4ea"
-SEED_COLOR = "#d97706"
-RECOMMENDED_COLOR = "#2563eb"
+SEED_COLOR = "#f97316"
+RECOMMENDED_COLOR = "#3b82f6"
 KEYWORD_COLOR = "#94a3b8"
 STATE_PAYLOAD_KEY = "ads_scholargraph_payload"
 STATE_SIGNATURE_KEY = "ads_scholargraph_signature"
@@ -145,6 +143,96 @@ def _inject_app_css() -> None:
     st.markdown(
         """
         <style>
+          .stApp {
+            background:
+              radial-gradient(circle at top left, rgba(217, 119, 6, 0.10), transparent 28%),
+              radial-gradient(circle at top right, rgba(37, 99, 235, 0.10), transparent 32%),
+              linear-gradient(180deg, #f5efe2 0%, #fbf8f1 46%, #fffdfa 100%);
+            color: #1f2937;
+          }
+
+          .block-container {
+            max-width: 1280px;
+            padding-top: 2.1rem;
+            padding-bottom: 2.8rem;
+          }
+
+          .stApp, .stMarkdown, label, [data-testid="stSidebar"], [data-testid="stMetricValue"] {
+            font-family: "Trebuchet MS", "Gill Sans", sans-serif;
+          }
+
+          h1, h2, h3, h4 {
+            font-family: "Georgia", "Times New Roman", serif;
+            letter-spacing: -0.03em;
+            color: #172033;
+          }
+
+          [data-testid="stSidebar"] > div:first-child {
+            background:
+              linear-gradient(180deg, rgba(255, 252, 247, 0.96) 0%,
+              rgba(244, 238, 228, 0.98) 100%);
+            border-right: 1px solid rgba(125, 102, 72, 0.16);
+          }
+
+          [data-testid="stSidebar"] h2,
+          [data-testid="stSidebar"] h3,
+          [data-testid="stSidebar"] label,
+          [data-testid="stSidebar"] p {
+            color: #263142;
+          }
+
+          .stButton > button,
+          div[data-testid="stFormSubmitButton"] > button {
+            border: 0;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #d97706 0%, #c2410c 100%);
+            color: #fffdf9;
+            font-weight: 700;
+            padding: 0.7rem 1.4rem;
+            box-shadow: 0 14px 28px rgba(194, 65, 12, 0.18);
+          }
+
+          .stButton > button:hover,
+          div[data-testid="stFormSubmitButton"] > button:hover {
+            background: linear-gradient(135deg, #ea580c 0%, #9a3412 100%);
+            color: #fffdf9;
+          }
+
+          div[data-baseweb="select"] > div,
+          .stTextInput input,
+          .stNumberInput input {
+            border-radius: 14px;
+            border-color: rgba(148, 163, 184, 0.5);
+            background: rgba(255, 252, 247, 0.92);
+          }
+
+          .stTabs [data-baseweb="tab-list"] {
+            gap: 0.5rem;
+            padding-bottom: 0.25rem;
+          }
+
+          .stTabs [data-baseweb="tab"] {
+            height: auto;
+            padding: 0.6rem 1rem;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: rgba(255, 252, 247, 0.82);
+          }
+
+          .stTabs [aria-selected="true"] {
+            background: #ffffff;
+            color: #172033;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+          }
+
+          div[data-testid="stMetric"] {
+            background: rgba(255, 252, 247, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            border-radius: 18px;
+            padding: 0.8rem 1rem;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+          }
+
           .sg-badge-row,
           .sg-legend-row {
             display: flex;
@@ -161,33 +249,36 @@ def _inject_app_css() -> None:
             border-radius: 999px;
             font-size: 0.82rem;
             border: 1px solid rgba(148, 163, 184, 0.24);
-            background: rgba(245, 245, 245, 0.88);
+            background: rgba(255, 252, 247, 0.88);
             color: #172033;
           }
 
           .sg-card {
             padding: 1.15rem 1.15rem 1rem 1.15rem;
-            border-radius: 12px;
+            border-radius: 22px;
             border: 1px solid rgba(148, 163, 184, 0.24);
-            background: rgba(245, 245, 245, 0.92);
+            background: rgba(255, 252, 247, 0.92);
+            box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
           }
 
           .sg-card-cool {
-            background: rgba(239, 246, 255, 0.92);
+            background:
+              linear-gradient(180deg, rgba(239, 246, 255, 0.92) 0%,
+              rgba(255, 252, 247, 0.92) 100%);
           }
 
           .sg-card-label {
             margin: 0 0 0.35rem 0;
+            color: #7c5a39;
             text-transform: uppercase;
             letter-spacing: 0.10em;
             font-size: 0.72rem;
             font-weight: 700;
-            color: #5b677b;
           }
 
           .sg-card-title {
             margin: 0;
-            font-size: 1.2rem;
+            font-size: 1.4rem;
             color: #172033;
           }
 
@@ -292,72 +383,14 @@ def _render_graph_legend() -> None:
     )
 
 
-def _initial_graph_positions(nodes: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
-    seed_ids: list[str] = []
-    recommended_ids: list[str] = []
-    keyword_ids: list[str] = []
-
-    for node in nodes:
-        node_id = node.get("id")
-        node_type = node.get("type")
-        if not isinstance(node_id, str) or not isinstance(node_type, str):
-            continue
-        if node_type == "seed":
-            seed_ids.append(node_id)
-        elif node_type == "recommended":
-            recommended_ids.append(node_id)
-        elif node_type == "keyword":
-            keyword_ids.append(node_id)
-
-    positions: dict[str, tuple[float, float]] = {}
-    if seed_ids:
-        positions[seed_ids[0]] = (0.0, 0.0)
-
-    rec_count = len(recommended_ids)
-    if rec_count == 1:
-        positions[recommended_ids[0]] = (280.0, -40.0)
-    elif rec_count > 1:
-        for idx, node_id in enumerate(recommended_ids):
-            angle = ((2.0 * math.pi) * idx / rec_count) - (math.pi / 2.0)
-            radius = 300.0 if idx % 2 == 0 else 250.0
-            positions[node_id] = (
-                math.cos(angle) * radius,
-                math.sin(angle) * radius,
-            )
-
-    keyword_count = len(keyword_ids)
-    if keyword_count == 1:
-        positions[keyword_ids[0]] = (0.0, -430.0)
-    elif keyword_count > 1:
-        for idx, node_id in enumerate(keyword_ids):
-            angle = ((2.0 * math.pi) * idx / keyword_count) - (math.pi / 2.0)
-            positions[node_id] = (
-                math.cos(angle) * 450.0,
-                math.sin(angle) * 450.0,
-            )
-
-    return positions
-
-
 def _build_request_signature(
     *,
     bibcode: str,
     mode: str,
     k: int,
     graph_k: int,
-    include_citations: bool,
-    include_keywords: bool,
-    include_similarity: bool,
-) -> tuple[str, str, int, int, bool, bool, bool]:
-    return (
-        bibcode,
-        mode,
-        k,
-        graph_k,
-        include_citations,
-        include_keywords,
-        include_similarity,
-    )
+) -> tuple[str, str, int, int]:
+    return (bibcode, mode, k, graph_k)
 
 
 def _filter_subgraph(
@@ -366,6 +399,9 @@ def _filter_subgraph(
     details_by_id: dict[str, dict[str, Any]],
     show_papers: bool,
     show_keywords: bool,
+    include_citations: bool,
+    include_keywords: bool,
+    include_similarity: bool,
     year_range: tuple[int, int],
     min_citations: int,
     min_pagerank: float,
@@ -423,8 +459,18 @@ def _filter_subgraph(
         target = edge.get("target")
         if not isinstance(source, str) or not isinstance(target, str):
             continue
-        if source in keep_ids and target in keep_ids:
-            kept_edges.append(edge)
+        if source not in keep_ids or target not in keep_ids:
+            continue
+
+        edge_type = edge.get("type", "")
+        if edge_type == "CITES" and not include_citations:
+            continue
+        if edge_type == "HAS_KEYWORD" and not include_keywords:
+            continue
+        if edge_type == "SIMILAR_TO" and not include_similarity:
+            continue
+
+        kept_edges.append(edge)
 
     return {"nodes": kept_nodes, "edges": kept_edges}
 
@@ -619,20 +665,14 @@ def _render_subgraph(
     highlighted_nodes: set[str] | None = None,
     highlighted_edges: set[tuple[str, str]] | None = None,
 ) -> Network:
-    net = Network(
-        height=f"{GRAPH_HEIGHT_PX}px",
-        width="100%",
-        directed=True,
-        bgcolor=GRAPH_BACKGROUND,
-        font_color="#1f2937",
-    )
+    net = Network(height=f"{GRAPH_HEIGHT_PX}px", width="100%", directed=True, bgcolor="#ffffff")
     highlighted_nodes = highlighted_nodes or set()
     highlighted_edges = highlighted_edges or set()
 
     color_map = {
-        "seed": {"background": SEED_COLOR, "border": "#9a3412"},
-        "recommended": {"background": RECOMMENDED_COLOR, "border": "#1d4ed8"},
-        "keyword": {"background": KEYWORD_COLOR, "border": "#94a3b8"},
+        "seed": SEED_COLOR,
+        "recommended": RECOMMENDED_COLOR,
+        "keyword": KEYWORD_COLOR,
     }
     shape_map = {
         "seed": "star",
@@ -649,79 +689,36 @@ def _render_subgraph(
         "recommended": 14,
         "keyword": 12,
     }
+
     nodes = subgraph.get("nodes", [])
-    initial_positions = _initial_graph_positions(
-        [node for node in nodes if isinstance(node, dict)]
-    )
     for node in nodes:
         node_id = node.get("id")
         if not isinstance(node_id, str):
             continue
 
         node_type = node.get("type") if isinstance(node.get("type"), str) else "recommended"
-        detail = detail_by_id.get(node_id, {})
         label = _node_display_label(
             node,
             show_full_titles=show_full_titles,
             max_label_len=max_label_len,
         )
-        if node_type == "keyword" and not show_full_titles:
-            label = shorten_title(label, min(max_label_len, 22))
-        elif (
-            node_type == "recommended"
-            and not show_full_titles
-            and node_id not in highlighted_nodes
-        ):
-            label = shorten_title(label, min(max_label_len, 34))
-
-        tooltip = build_tooltip(node, detail)
+        tooltip = build_tooltip(node, detail_by_id.get(node_id))
         is_highlighted = node_id in highlighted_nodes
-        score = _safe_float(detail.get("score")) or 0.0
-        pagerank = _safe_float(detail.get("pagerank")) or 0.0
-        citation_count = _safe_int(detail.get("citation_count")) or 0
-        signal_boost = min(
-            12.0,
-            (score * 18.0) + (pagerank * 80.0) + min(citation_count / 40.0, 3.0),
-        )
-        size = float(size_map.get(node_type, 22))
-        if node_type != "keyword":
-            size += signal_boost
-        if is_highlighted:
-            size *= 1.25
-
-        border_width = 4 if is_highlighted else 1.8
-        node_color = color_map.get(node_type, {"background": "#64748b", "border": "#475569"})
-        if is_highlighted:
-            node_color = {"background": "#facc15", "border": "#b45309"}
-
-        position = initial_positions.get(node_id, (0.0, 0.0))
+        border_width = 4 if is_highlighted else 2
 
         net.add_node(
             node_id,
             label=label,
             title=tooltip,
-            color=node_color,
+            color=("#facc15" if is_highlighted else color_map.get(node_type, "#64748b")),
             shape=shape_map.get(node_type, "dot"),
-            size=size,
+            size=(
+                size_map.get(node_type, 22) * 1.5
+                if is_highlighted
+                else size_map.get(node_type, 22)
+            ),
             borderWidth=border_width,
-            shadow={
-                "enabled": True,
-                "size": 12,
-                "x": 0,
-                "y": 6,
-                "color": "rgba(15, 23, 42, 0.12)",
-            },
-            font={
-                "size": font_map.get(node_type, 14),
-                "face": "Trebuchet MS",
-                "color": "#1f2937",
-                "strokeWidth": 4,
-                "strokeColor": "rgba(248, 244, 234, 0.9)",
-            },
-            x=position[0],
-            y=position[1],
-            fixed={"x": not enable_physics, "y": not enable_physics},
-            physics=(enable_physics and node_type != "seed"),
+            font={"size": font_map.get(node_type, 14), "face": "Helvetica"},
         )
 
     edges = subgraph.get("edges", [])
@@ -733,83 +730,57 @@ def _render_subgraph(
 
         edge_type = edge.get("type") if isinstance(edge.get("type"), str) else "RECOMMENDS"
         label = edge.get("label") if isinstance(edge.get("label"), str) else edge_type
-        color = "rgba(71, 85, 105, 0.35)"
-        width = 1.8
-        smooth_type = "continuous"
-        edge_label = ""
+        color = "#64748b"
+        width = 2.0
         if edge_type == "CITES":
-            color = "rgba(148, 163, 184, 0.48)"
-            width = 0.9
+            color = "#94a3b8"
+            width = 1.0
         elif edge_type == "HAS_KEYWORD":
-            color = "rgba(148, 163, 184, 0.36)"
-            width = 1.1
+            color = "#9ca3af"
+            width = 1.2
         elif edge_type == "RECOMMENDS":
-            color = "rgba(194, 65, 12, 0.86)"
-            width = 2.8
-            smooth_type = "curvedCW"
-            if show_edge_labels:
-                edge_label = shorten_title(label, 30)
+            color = "#f59e0b"
+            width = 2.2
         elif edge_type == "SIMILAR_TO":
             similarity = edge.get("similarity")
             similarity_score = float(similarity) if isinstance(similarity, (int, float)) else 0.0
-            color = "rgba(124, 58, 237, 0.62)"
-            width = 1.2 + (2.3 * min(max(similarity_score, 0.0), 1.0))
-            smooth_type = "curvedCCW"
-            if show_edge_labels:
-                edge_label = label
+            color = "#ec4899"
+            width = 1.2 + (2.5 * min(max(similarity_score, 0.0), 1.0))
         dashes = edge_type == "HAS_KEYWORD"
         if (source, target) in highlighted_edges:
-            color = "rgba(220, 38, 38, 0.92)"
+            color = "#ef4444"
             width = 3.2
             dashes = False
-            edge_label = shorten_title(label, 34) if show_edge_labels else ""
 
         net.add_edge(
             source,
             target,
-            label=edge_label,
+            label=label if show_edge_labels else "",
             title=label,
             color=color,
             width=width,
             dashes=dashes,
-            smooth={"enabled": True, "type": smooth_type, "roundness": 0.16},
-            font={
-                "size": 10,
-                "face": "Trebuchet MS",
-                "align": "top",
-                "background": "rgba(255, 252, 247, 0.92)",
-                "strokeWidth": 0,
-            },
         )
 
     options = {
-        "layout": {
-            "randomSeed": 17,
-            "improvedLayout": enable_physics,
-        },
+        "layout": {"improvedLayout": True},
         "interaction": {
             "hover": True,
             "navigationButtons": True,
             "keyboard": True,
-            "multiselect": True,
-            "tooltipDelay": 100,
+            "tooltipDelay": 80,
             "zoomView": True,
             "dragView": True,
         },
-        "nodes": {
-            "borderWidthSelected": 4,
-            "shapeProperties": {"useBorderWithImage": False},
-        },
         "physics": {
             "enabled": enable_physics,
-            "solver": "forceAtlas2Based",
-            "forceAtlas2Based": {
-                "gravitationalConstant": -58,
-                "centralGravity": 0.018,
-                "springLength": 145,
-                "springConstant": 0.08,
-                "damping": 0.56,
-                "avoidOverlap": 0.72,
+            "barnesHut": {
+                "gravitationalConstant": -12000,
+                "centralGravity": 0.2,
+                "springLength": 220,
+                "springConstant": 0.02,
+                "damping": 0.82,
+                "avoidOverlap": 0.35,
             },
             "stabilization": {
                 "enabled": enable_physics,
@@ -818,94 +789,13 @@ def _render_subgraph(
             },
         },
         "edges": {
-            "color": {"inherit": False},
-            "arrows": {"to": {"enabled": True, "scaleFactor": 0.58}},
-            "selectionWidth": 1.3,
+            "arrows": {"to": {"enabled": True, "scaleFactor": 0.7}},
+            "font": {"size": 11, "align": "middle", "face": "Helvetica"},
             "smooth": {"enabled": True, "type": "dynamic"},
         },
     }
     net.set_options(json.dumps(options))
-    html_payload = net.generate_html()
-    fit_script = """
-    <script type="text/javascript">
-    (function() {
-      function centerGraph() {
-        if (typeof network === "undefined") {
-          return;
-        }
-        const apply = function() {
-          try {
-            network.redraw();
-            network.fit({animation: false});
-            network.moveTo({scale: 0.82});
-          } catch (err) {
-            console.warn(err);
-          }
-        };
-        apply();
-        if (typeof network.once === "function") {
-          network.once("stabilizationIterationsDone", apply);
-        }
-        setTimeout(apply, 150);
-        setTimeout(apply, 600);
-        setTimeout(apply, 1200);
-      }
-
-      function whenVisible(callback) {
-        const container = document.getElementById("mynetwork");
-        if (!container) {
-          return;
-        }
-
-        let rafId = null;
-        const schedule = function() {
-          if (rafId !== null) {
-            cancelAnimationFrame(rafId);
-          }
-          rafId = requestAnimationFrame(function() {
-            rafId = null;
-            if (container.clientWidth > 0 && container.clientHeight > 0) {
-              callback();
-            }
-          });
-        };
-
-        schedule();
-
-        if (typeof ResizeObserver !== "undefined") {
-          const resizeObserver = new ResizeObserver(schedule);
-          resizeObserver.observe(container);
-        } else {
-          window.addEventListener("resize", schedule);
-        }
-
-        if (typeof MutationObserver !== "undefined") {
-          const mutationObserver = new MutationObserver(schedule);
-          let current = container;
-          while (current) {
-            mutationObserver.observe(current, {
-              attributes: true,
-              attributeFilter: ["style", "class"],
-            });
-            current = current.parentElement;
-          }
-        }
-
-        document.addEventListener("visibilitychange", schedule);
-      }
-
-      if (document.readyState === "complete") {
-        whenVisible(centerGraph);
-      } else {
-        window.addEventListener("load", function() {
-          whenVisible(centerGraph);
-        });
-      }
-    })();
-    </script>
-    """
-    html_payload = html_payload.replace("</body>", fit_script + "</body>")
-    components_html(html_payload, height=GRAPH_HEIGHT_PX + 40, scrolling=True)
+    components_html(net.generate_html(), height=GRAPH_HEIGHT_PX + 40, scrolling=True)
     return net
 
 
@@ -968,11 +858,16 @@ def main() -> None:
         except requests.RequestException as exc:
             st.error(f"Search failed: {exc}")
         st.session_state["ads_scholargraph_search_results"] = matches
+        st.session_state["ads_scholargraph_last_query"] = query.strip()
     elif "ads_scholargraph_search_results" in st.session_state:
         matches = st.session_state["ads_scholargraph_search_results"]
 
     if not matches:
-        st.info("Enter keywords and click Search to find seed papers.")
+        last_query = st.session_state.get("ads_scholargraph_last_query")
+        if last_query:
+            st.warning(f"No papers found for **{last_query}**. Try different keywords.")
+        else:
+            st.info("Enter keywords and click Search to find seed papers.")
         return
 
     paper_by_label = {_paper_label(paper): paper for paper in matches}
@@ -990,9 +885,6 @@ def main() -> None:
         mode=mode,
         k=k,
         graph_k=graph_k,
-        include_citations=include_citations,
-        include_keywords=include_keywords,
-        include_similarity=include_similarity,
     )
 
     trigger = st.button("Recommend", type="primary")
@@ -1010,9 +902,9 @@ def main() -> None:
                     params={
                         "k": graph_k,
                         "mode": mode,
-                        "include_citations": include_citations,
-                        "include_keywords": include_keywords,
-                        "include_similarity": include_similarity,
+                        "include_citations": True,
+                        "include_keywords": True,
+                        "include_similarity": True,
                     },
                 )
             except requests.RequestException as exc:
@@ -1044,14 +936,7 @@ def main() -> None:
 
     cached_signature = st.session_state.get(STATE_SIGNATURE_KEY)
     if cached_signature != request_signature:
-        cached_for = cached_payload_raw.get("selected_bibcode")
-        if isinstance(cached_for, str):
-            st.info(
-                "Settings changed. Showing cached results for "
-                f"`{cached_for}` until you click Recommend again."
-            )
-        else:
-            st.info("Settings changed. Click Recommend to refresh data.")
+        st.warning("Settings changed — click **Recommend** again to apply.")
 
     seed_detail_raw = cached_payload_raw.get("seed_detail")
     graph_data_raw = cached_payload_raw.get("graph_data")
@@ -1188,6 +1073,9 @@ def main() -> None:
         details_by_id=details_by_id,
         show_papers=show_papers,
         show_keywords=show_keywords,
+        include_citations=include_citations,
+        include_keywords=include_keywords,
+        include_similarity=include_similarity,
         year_range=(int(year_range[0]), int(year_range[1])),
         min_citations=min_citations,
         min_pagerank=min_pagerank,
